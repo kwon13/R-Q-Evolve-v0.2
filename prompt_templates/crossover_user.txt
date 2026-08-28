@@ -1,0 +1,13 @@
+PARENT A
+<question>
+$left_question
+</question>
+\boxed{$left_answer}
+
+PARENT B
+<question>
+$right_question
+</question>
+\boxed{$right_answer}
+
+Create one new child now. The child must be substantially different from both parents while remaining mathematically valid and exactly gradable.

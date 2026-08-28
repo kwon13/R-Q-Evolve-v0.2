@@ -1,0 +1,207 @@
+run:
+  name: rq_evolve_v02_4b_4gpu
+  master_seed: 0
+  max_iterations: 320
+  schema_version: concrete-problem-map-v1
+
+generation:
+  pairs_per_cycle: 32
+  children_per_pair: 2
+  initial_candidates: 64
+  refill_candidates: 32
+  max_candidates: 128
+  temperature: 0.45
+  top_p: 0.85
+  max_tokens: 4096
+  require_distinct_lineages: true
+
+labeling:
+  num_rollouts: 9
+  temperature: 1.0
+  top_p: 1.0
+  top_k: 40
+  max_tokens: 4096
+  min_agreement: 0.5555555555555556
+  require_proposed_answer_match: true
+  count_invalid_in_denominator: true
+  max_infrastructure_retries: 2
+
+scoring:
+  num_rollouts: 8
+  temperature: 1.0
+  top_p: 0.95
+  max_tokens: 5000
+  # This band is read only from cycle t-1 for training eligibility. The fresh
+  # cycle-t score supplies the replay payload and never re-gates that choice.
+  frontier_s_hat_low: 0.1
+  frontier_s_hat_high: 0.9
+  reject_overlong: true
+  reject_invalid_answer: false
+  reject_duplicates: false
+  require_entropy: true
+  max_infrastructure_retries: 2
+
+domain:
+  min_probability: 0.55
+  min_logit_margin: 0.50
+  temperature: 0.0
+  max_tokens: 1
+
+novelty:
+  exact: true
+  near_duplicate_threshold: 0.92
+  parent_similarity_ceiling: 0.94
+  min_question_chars: 20
+  max_question_chars: 4000
+
+archive:
+  output_dir: ./rq_output/rq_evolve_v02_4b_4gpu/pipeline
+  seed_file: seed_problems/diagonal_seeds.jsonl
+  selection_strategy: uniform_cell
+  fsync_jsonl: true
+  store_rollout_text: true
+
+frontier:
+  training_batch_size: 32
+  selection_lag: 1
+  warmup_use_current_score: false
+  skip_update_when_short: true
+  remeasure_budget: 64
+  max_per_cell_per_batch: 8
+
+training:
+  enabled: true
+  replay_score_rollouts: true
+  total_training_steps: 256
+  # Scheduled saves are disabled. The engine externally checkpoints every
+  # successful optimizer update at the post-weight-sync barrier.
+  save_freq: 0
+  resume_mode: disable
+
+backend:
+  kind: verl
+  model_path: /data1/yhoon113/qwen3-4b-base
+  n_gpus: 4
+  gpu_memory_utilization: 0.42
+  request_chunk_size: 8
+  # Seven binary arms per problem; one-token requests can be batched broadly.
+  domain_request_chunk_size: 56
+
+verl_config:
+  data:
+    max_prompt_length: 6000
+    max_response_length: 5000
+    train_batch_size: 32
+    val_batch_size: 60000
+    shuffle: false
+    truncation: left
+    dataloader_num_workers: 0
+    filter_overlong_prompts: false
+    trust_remote_code: true
+
+  actor_rollout_ref:
+    model:
+      path: /data1/yhoon113/qwen3-4b-base
+      trust_remote_code: true
+      use_remove_padding: true
+      enable_gradient_checkpointing: true
+      override_config:
+        attn_implementation: sdpa
+        _attn_implementation: sdpa
+
+    actor:
+      strategy: fsdp
+      ppo_mini_batch_size: 32
+      ppo_micro_batch_size: null
+      ppo_micro_batch_size_per_gpu: 4
+      use_dynamic_bsz: false
+      entropy_from_logits_with_chunking: true
+      use_kl_loss: true
+      kl_loss_coef: 1.0e-3
+      kl_loss_type: low_var_kl
+      use_torch_compile: false
+      fsdp_config:
+        param_offload: false
+        optimizer_offload: false
+      optim:
+        lr: 1.0e-6
+        weight_decay: 1.0e-2
+        lr_warmup_steps_ratio: 0.0
+        total_training_steps: 256
+
+    ref:
+      log_prob_micro_batch_size: null
+      log_prob_micro_batch_size_per_gpu: 4
+      fsdp_config:
+        param_offload: true
+
+    rollout:
+      name: vllm
+      mode: async
+      temperature: 1.0
+      top_p: 0.95
+      n: 8
+      # Required for calibrated YES/NO probabilities after allowed-token masking.
+      logprobs_mode: processed_logprobs
+      tensor_model_parallel_size: 1
+      gpu_memory_utilization: 0.42
+      max_model_len: 12000
+      max_num_batched_tokens: 12000
+      dtype: bfloat16
+      enable_chunked_prefill: true
+      enforce_eager: false
+      free_cache_engine: false
+      enable_sleep_mode: false
+      log_prob_micro_batch_size: null
+      log_prob_micro_batch_size_per_gpu: 4
+
+  critic:
+    ppo_mini_batch_size: 32
+    ppo_micro_batch_size: null
+    ppo_micro_batch_size_per_gpu: 2
+
+  reward_model:
+    enable: false
+    reward_manager: naive
+
+  reward:
+    custom_reward_function:
+      path: ./src/rq_evolve_v02/reward.py
+      name: compute_score
+    reward_manager:
+      source: register
+      name: naive
+    reward_model:
+      enable: false
+
+  algorithm:
+    adv_estimator: grpo
+    use_kl_in_reward: false
+    kl_penalty: low_var_kl
+    norm_adv_by_std_in_grpo: false
+
+  trainer:
+    total_epochs: 10000
+    total_training_steps: 256
+    project_name: rq_evolve_v02
+    experiment_name: qwen3_4b_concrete_map_4gpu
+    logger:
+      - console
+      - wandb
+    nnodes: 1
+    n_gpus_per_node: 4
+    val_before_train: false
+    test_freq: 32
+    # Prevent VERL's pre-weight-sync periodic saver from racing the pipeline's
+    # unconditional external checkpoint transaction after every update.
+    save_freq: 0
+    # A checkpoint is written after every successful update; retain only the
+    # two newest complete recovery points to bound disk usage.
+    max_actor_ckpt_to_keep: 2
+    max_critic_ckpt_to_keep: 2
+    default_local_dir: ./rq_output/rq_evolve_v02_4b_4gpu/checkpoints
+    device: cuda
+    resume_mode: disable
+
+  ray_init:
+    num_cpus: null

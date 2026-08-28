@@ -1,0 +1,17 @@
+extends: rq_evolve_v02_4gpu.yaml
+
+run:
+  name: rq_evolve_v02_4b_8gpu
+  max_iterations: 320
+
+archive:
+  output_dir: ./rq_output/rq_evolve_v02_4b_8gpu/pipeline
+
+backend:
+  n_gpus: 8
+
+verl_config:
+  trainer:
+    n_gpus_per_node: 8
+    experiment_name: qwen3_4b_concrete_map_8gpu
+    default_local_dir: ./rq_output/rq_evolve_v02_4b_8gpu/checkpoints

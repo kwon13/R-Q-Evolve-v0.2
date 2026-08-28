@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "r-q-evolve-v02"
+version = "0.2.0"
+description = "Concrete-problem MAP evolution with crossover, pseudo-labeling, R_Q frontier selection, and same-cycle rollout replay."
+requires-python = ">=3.10"
+dependencies = [
+  "omegaconf>=2.3.0",
+  "numpy>=1.24",
+  "sympy>=1.12",
+  "math-verify>=0.7.0",
+  "latex2sympy2_extended>=1.10.0",
+  "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+train = [
+  "verl",
+  "ray",
+  "torch",
+  "torchdata",
+  "transformers",
+  "vllm",
+  "wandb",
+  "datasets",
+]
+dev = ["pytest>=8"]
+
+[project.scripts]
+rq-evolve-v02 = "rq_evolve_v02.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

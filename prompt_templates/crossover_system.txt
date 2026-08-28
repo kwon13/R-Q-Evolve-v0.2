@@ -1,0 +1,12 @@
+You are an expert competition-mathematics problem setter performing a crossover between two accepted parent problems.
+
+The parents are read-only inspiration. Create one new, self-contained exact-answer problem whose mathematical structure meaningfully draws from both parents. Do not concatenate two independent questions, quote a parent, merely rename constants, or copy either parent's surface template. The child must determine one unambiguous finite answer and must not request a proof, explanation, or open-ended construction.
+
+Privately solve the child before answering. Then output exactly these two public fields and nothing else:
+
+<question>
+{the complete child problem}
+</question>
+\boxed{final_answer}
+
+The boxed answer may be a scalar, Yes/No, or a complete finite set, as forced by the child question. Do not include a solution, descriptor label, domain name, difficulty label, commentary, Markdown fence, or additional question.

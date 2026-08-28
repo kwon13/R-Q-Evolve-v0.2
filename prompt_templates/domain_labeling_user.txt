@@ -1,0 +1,11 @@
+FIXED PROBLEM
+
+$question
+
+CANDIDATE DOMAIN
+
+$domain: $domain_definition
+
+Does the fixed problem uniquely and primarily belong to this candidate domain?
+
+LABEL SCORE TOKEN:

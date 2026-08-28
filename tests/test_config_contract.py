@@ -1,0 +1,89 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from rq_evolve_v02.config import AppConfig, load_config
+
+
+def assert_invalid(mutator, match: str) -> None:
+    config = AppConfig()
+    mutator(config)
+    with pytest.raises(ValueError, match=match):
+        config.validate()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("pairs_per_cycle", 31),
+        ("children_per_pair", 3),
+        ("initial_candidates", 62),
+        ("refill_candidates", 16),
+        ("max_candidates", 256),
+    ],
+)
+def test_generation_geometry_is_fixed(field: str, value: int) -> None:
+    assert_invalid(
+        lambda config: setattr(config.generation, field, value),
+        "generation geometry is fixed",
+    )
+
+
+def test_label_score_and_training_geometry_is_fixed() -> None:
+    assert_invalid(
+        lambda config: setattr(config.labeling, "num_rollouts", 7),
+        "exactly 9 label rollouts",
+    )
+    assert_invalid(
+        lambda config: setattr(config.labeling, "min_agreement", 6 / 9),
+        "min_agreement=5/9",
+    )
+    assert_invalid(
+        lambda config: setattr(config.labeling, "require_proposed_answer_match", False),
+        "proposed answer",
+    )
+    assert_invalid(
+        lambda config: setattr(config.labeling, "count_invalid_in_denominator", False),
+        "denominator",
+    )
+    assert_invalid(
+        lambda config: setattr(config.scoring, "num_rollouts", 16),
+        "exactly 8 score rollouts",
+    )
+    assert_invalid(
+        lambda config: setattr(config.frontier, "training_batch_size", 16),
+        "exactly 32 training",
+    )
+    assert_invalid(
+        lambda config: setattr(config.frontier, "selection_lag", 0),
+        "selection_lag=1",
+    )
+
+
+def test_checkpoint_ownership_is_fixed() -> None:
+    assert_invalid(
+        lambda config: setattr(config.training, "save_freq", 32),
+        "externally checkpoints",
+    )
+    config = AppConfig()
+    config.verl_config = {"trainer": {"save_freq": 32}}
+    with pytest.raises(ValueError, match="periodic pre-weight-sync"):
+        config.validate()
+
+
+def test_shipped_gpu_configs_obey_fixed_contract() -> None:
+    root = Path(__file__).resolve().parents[1]
+    four = load_config(root / "configs" / "rq_evolve_v02_4gpu.yaml")
+    eight = load_config(root / "configs" / "rq_evolve_v02_8gpu.yaml")
+    for config, gpu_count in ((four, 4), (eight, 8)):
+        assert config.backend.n_gpus == gpu_count
+        assert config.generation.pairs_per_cycle == 32
+        assert config.generation.children_per_pair == 2
+        assert config.labeling.num_rollouts == 9
+        assert config.scoring.num_rollouts == 8
+        assert config.frontier.training_batch_size == 32
+        assert config.frontier.selection_lag == 1
+        assert config.training.save_freq == 0
+        assert config.verl_config["trainer"]["save_freq"] == 0
