@@ -4,6 +4,7 @@ import argparse
 import builtins
 import hashlib
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -20,6 +21,53 @@ from .helpers import make_record
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+class _ParserReturning:
+    def __init__(self, args: argparse.Namespace) -> None:
+        self.args = args
+
+    def parse_args(self, _argv: list[str] | None) -> argparse.Namespace:
+        return self.args
+
+
+def test_cli_unexpected_exception_prints_full_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def fail(_args: argparse.Namespace) -> int:
+        raise RuntimeError("diagnostic boom")
+
+    monkeypatch.setattr(
+        cli,
+        "build_parser",
+        lambda: _ParserReturning(SimpleNamespace(handler=fail)),
+    )
+
+    assert cli.main([]) == 1
+    stderr = capsys.readouterr().err
+    assert "Traceback (most recent call last):" in stderr
+    assert "raise RuntimeError(\"diagnostic boom\")" in stderr
+    assert "RuntimeError: diagnostic boom" in stderr
+
+
+def test_cli_keyboard_interrupt_remains_clean_exit_130(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def interrupt(_args: argparse.Namespace) -> int:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(
+        cli,
+        "build_parser",
+        lambda: _ParserReturning(SimpleNamespace(handler=interrupt)),
+    )
+
+    assert cli.main([]) == 130
+    stderr = capsys.readouterr().err
+    assert stderr == "interrupted\n"
+    assert "Traceback" not in stderr
 
 
 def make_config(run_dir: Path) -> AppConfig:

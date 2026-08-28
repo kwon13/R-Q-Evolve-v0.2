@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ast
+import inspect
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -27,6 +29,37 @@ def _trainer_config() -> _AttrDict:
         reward_model=_AttrDict(enable=False),
         trainer=_AttrDict(n_gpus_per_node=4, nnodes=1, device="cuda"),
     )
+
+
+def test_padding_helpers_follow_five_item_verl_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pad = object()
+    unpad = object()
+    monkeypatch.setattr(
+        verl_backend,
+        "_require_verl",
+        lambda: (object(), object(), pad, unpad, object()),
+    )
+
+    assert verl_backend._require_padding_helpers() == (pad, unpad)
+
+
+def test_require_verl_is_never_unpacked_as_four_items() -> None:
+    tree = ast.parse(inspect.getsource(verl_backend))
+    unpack_sizes: list[int] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Call):
+            continue
+        function = node.value.func
+        if not isinstance(function, ast.Name) or function.id != "_require_verl":
+            continue
+        for target in node.targets:
+            if isinstance(target, (ast.Tuple, ast.List)):
+                unpack_sizes.append(len(target.elts))
+
+    assert unpack_sizes
+    assert unpack_sizes == [5, 5]
 
 
 def test_driver_environment_is_complete_and_pythonpath_is_idempotent(

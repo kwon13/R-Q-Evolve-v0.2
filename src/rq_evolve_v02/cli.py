@@ -6,6 +6,7 @@ import argparse
 import json
 from pathlib import Path
 import sys
+import traceback
 from typing import Any
 
 from .archive import ConcreteMapArchive
@@ -232,8 +233,8 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("interrupted", file=sys.stderr)
         return 130
-    except Exception as exc:
-        print(f"{type(exc).__name__}: {exc}", file=sys.stderr)
+    except Exception:
+        traceback.print_exc()
         return 1
 
 

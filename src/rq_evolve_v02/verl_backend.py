@@ -68,6 +68,13 @@ def _require_verl() -> tuple[Any, Any, Any, Any, Any]:
     )
 
 
+def _require_padding_helpers() -> tuple[Callable[..., Any], Callable[..., Any]]:
+    """Return VERL's padding pair without duplicating its five-item unpack."""
+
+    _, _, pad_to_divisor, unpad, _ = _require_verl()
+    return pad_to_divisor, unpad
+
+
 class VerlPolicyBackend:
     """Use one resident VERL trainer's actor/rollout workers for all purposes."""
 
@@ -243,7 +250,7 @@ class VerlPolicyBackend:
         if sampling.top_k is not None:
             gen_batch.meta_info["top_k"] = int(sampling.top_k)
 
-        _, _, pad_to_divisor, unpad = _require_verl()
+        pad_to_divisor, unpad = _require_padding_helpers()
         manager = self._manager()
         workers = getattr(manager, "agent_loop_workers", None)
         divisor = max(1, len(workers) if workers is not None else 1)
@@ -376,7 +383,7 @@ class VerlPolicyBackend:
                 "allowed_token_ids": [int(yes_ids[0]), int(no_ids[0])],
             }
         )
-        _, _, pad_to_divisor, unpad = _require_verl()
+        pad_to_divisor, unpad = _require_padding_helpers()
         manager = self._manager()
         workers = getattr(manager, "agent_loop_workers", None)
         divisor = max(1, len(workers) if workers is not None else 1)
@@ -494,7 +501,7 @@ class VerlPolicyBackend:
         batch.meta_info["global_token_num"] = torch.sum(
             batch.batch["attention_mask"], dim=-1
         ).tolist()
-        _, _, pad_to_divisor, unpad = _require_verl()
+        pad_to_divisor, unpad = _require_padding_helpers()
         world_size = max(
             1, int(getattr(self.trainer.actor_rollout_wg, "world_size", 1))
         )
