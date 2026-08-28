@@ -33,7 +33,6 @@ def test_labeling_uses_fixed_requested_denominator() -> None:
         verifier={"mode": "expression"},
         grader=ExactGrader(),  # type: ignore[arg-type]
         min_agreement=5 / 9,
-        require_proposed_match=True,
     )
     assert evidence.accepted
     assert evidence.cluster_sizes == [5]
@@ -41,7 +40,7 @@ def test_labeling_uses_fixed_requested_denominator() -> None:
     assert len(evidence.rollouts) == 9
 
 
-def test_labeling_rejects_incomplete_tie_and_proposed_mismatch() -> None:
+def test_labeling_rejects_incomplete_and_tied_groups() -> None:
     incomplete = build_pseudo_label(
         group(*([r"\boxed{2}"] * 8)),
         requested_rollouts=9,
@@ -49,7 +48,6 @@ def test_labeling_rejects_incomplete_tie_and_proposed_mismatch() -> None:
         verifier={"mode": "expression"},
         grader=ExactGrader(),  # type: ignore[arg-type]
         min_agreement=5 / 9,
-        require_proposed_match=True,
     )
     assert incomplete.reason == "incomplete_label_group"
 
@@ -60,10 +58,10 @@ def test_labeling_rejects_incomplete_tie_and_proposed_mismatch() -> None:
         verifier={"mode": "expression"},
         grader=ExactGrader(),  # type: ignore[arg-type]
         min_agreement=4 / 9,
-        require_proposed_match=True,
     )
     assert tie.reason == "label_tie"
 
+def test_proposed_answer_mismatch_is_audit_only() -> None:
     mismatch = build_pseudo_label(
         group(*([r"\boxed{2}"] * 9)),
         requested_rollouts=9,
@@ -71,9 +69,11 @@ def test_labeling_rejects_incomplete_tie_and_proposed_mismatch() -> None:
         verifier={"mode": "expression"},
         grader=ExactGrader(),  # type: ignore[arg-type]
         min_agreement=5 / 9,
-        require_proposed_match=True,
     )
-    assert mismatch.reason == "proposed_answer_mismatch"
+    assert mismatch.accepted
+    assert mismatch.reason is None
+    assert mismatch.pseudo_gold == "2"
+    assert not mismatch.proposed_matches
 
 
 def test_labeling_rejects_non_transitive_equivalence() -> None:
@@ -84,6 +84,5 @@ def test_labeling_rejects_non_transitive_equivalence() -> None:
         verifier={"mode": "expression"},
         grader=NonTransitiveGrader(),  # type: ignore[arg-type]
         min_agreement=2 / 3,
-        require_proposed_match=False,
     )
     assert evidence.reason == "non_transitive_answer_equivalence"

@@ -31,7 +31,6 @@ class LabelingConfig:
     top_k: int = 40
     max_tokens: int = 4096
     min_agreement: float = 5 / 9
-    require_proposed_answer_match: bool = True
     count_invalid_in_denominator: bool = True
     max_infrastructure_retries: int = 2
 
@@ -174,8 +173,6 @@ class AppConfig:
             abs_tol=1e-15,
         ):
             raise ValueError("v0.2 requires labeling.min_agreement=5/9")
-        if not self.labeling.require_proposed_answer_match:
-            raise ValueError("v0.2 requires the proposed answer to match pseudo-gold")
         if not self.labeling.count_invalid_in_denominator:
             raise ValueError(
                 "count_invalid_in_denominator must remain true; boxless completed "

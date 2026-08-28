@@ -11,8 +11,8 @@ Each cycle has two distinct data paths:
 1. Select 32 parent pairs from the accepted MAP and request two children per pair, giving 64 initial candidates. If too few survive, refill in blocks of 32 up to 128 candidates.
 2. Strictly parse each candidate into one question and one proposed boxed answer.
 3. Reject malformed, unsafe, exact-duplicate, near-duplicate, or parent-copy candidates.
-4. Run exactly nine independent label rollouts. Invalid or boxless outputs remain in the fixed denominator. Accept only a unique pseudo-gold cluster with at least five votes and an independently verified match to the crossover model's proposed answer.
-5. Assign exactly one high-confidence top-level mathematical domain and one deterministic problem type.
+4. Run exactly nine independent label rollouts. Invalid or boxless outputs remain in the fixed denominator. Accept only a unique pseudo-gold cluster with at least five votes. The crossover answer is retained as audit metadata but does not gate acceptance.
+5. Read exactly one closed-vocabulary top-level domain from the crossover response and assign one deterministic problem type.
 6. Append every valid and novel problem to the accepted catalog. Frontier membership controls training, not archival.
 7. Score accepted incumbents with a complete group of eight current-policy rollouts and compute \(R_Q\).
 8. Select training problems only with the previous iteration's score, then replay the newly measured current-policy payload exactly once. The fresh success rate is audit metadata, not a second eligibility gate: a complete current group remains eligible even when it is all-correct or all-wrong. A training update requires exactly 32 distinct problem groups from one policy version; there is no padding, resampling fallback, or partial update.
@@ -78,7 +78,7 @@ The pipeline owns an append-only accepted catalog and separate observations:
 
 - `candidate_events.jsonl`: every acceptance or rejection decision and its reason;
 - `accepted_problems.jsonl`: every valid, novel problem, not only frontier problems;
-- `label_observations.jsonl`: terminal nine-rollout pseudo-label evidence for accepted and rejected candidates, including fixed-denominator clusters and the proposed-answer match verdict;
+- `label_observations.jsonl`: terminal nine-rollout pseudo-label evidence for accepted and rejected candidates, including fixed-denominator clusters and a non-gating proposed-answer match audit;
 - `score_observations.jsonl`: policy-stamped \(R_Q\) measurements;
 - `training_events.jsonl`: batch selection, replay, skip, and update events;
 - `map_index.json`: rebuildable 35-cell projection over the accepted catalog;

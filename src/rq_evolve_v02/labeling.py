@@ -38,7 +38,6 @@ def build_pseudo_label(
     verifier: dict,
     grader: GraderClient,
     min_agreement: float,
-    require_proposed_match: bool,
     identity: PolicyIdentity | None = None,
 ) -> LabelEvidence:
     identity_fields = {
@@ -142,8 +141,6 @@ def build_pseudo_label(
     proposed_matches = grader.grade(proposed_answer, pseudo_gold, verifier)
     if agreement < min_agreement:
         reason = "insufficient_label_agreement"
-    elif require_proposed_match and not proposed_matches:
-        reason = "proposed_answer_mismatch"
     else:
         reason = None
     return LabelEvidence(

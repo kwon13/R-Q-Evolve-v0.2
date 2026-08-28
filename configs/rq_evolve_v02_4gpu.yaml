@@ -22,7 +22,6 @@ labeling:
   top_k: 40
   max_tokens: 4096
   min_agreement: 0.5555555555555556
-  require_proposed_answer_match: true
   count_invalid_in_denominator: true
   max_infrastructure_retries: 2
 

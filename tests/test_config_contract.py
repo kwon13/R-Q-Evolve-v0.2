@@ -41,10 +41,6 @@ def test_label_score_and_training_geometry_is_fixed() -> None:
         "min_agreement=5/9",
     )
     assert_invalid(
-        lambda config: setattr(config.labeling, "require_proposed_answer_match", False),
-        "proposed answer",
-    )
-    assert_invalid(
         lambda config: setattr(config.labeling, "count_invalid_in_denominator", False),
         "denominator",
     )

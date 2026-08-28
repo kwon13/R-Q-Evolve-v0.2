@@ -9,9 +9,9 @@ R-Q-Evolve-v0.2 is a standalone implementation. The two neighboring repositories
 | Free-form challenger output | `../R-Zero/question_generate/question_generate.py` | Extends the one `<question>...</question>` plus `\boxed{...}` envelope with one strict seven-value `<domain>` field; the prompt contains two concrete parents and each of 32 pair prompts requests two samples. |
 | Independent pseudo-label rollouts | `../R-Zero/question_evaluate/evaluate.py` | Retains nine solver samples, but fixes the denominator at nine. Boxless or invalid outputs do not disappear from the confidence denominator. |
 | Symbolic answer clustering | `../R-Zero/question_evaluate/evaluate.py` | Uses hard-timeout grading, checks equivalence symmetrically, requires a unique winning cluster, and abstains on non-transitive or ambiguous relations. |
-| Challenger answer | Generated-question JSON in R-Zero | Treats it as a proposal, never as gold. Acceptance requires it to match the independently selected pseudo-gold. |
+| Challenger answer | Generated-question JSON in R-Zero | Retains it as generation metadata. As in the inspected evaluator, Solver consensus supplies pseudo-gold and a Challenger-answer mismatch does not reject the question. |
 
-R-Zero's original evaluator computes agreement over only extracted answers and does not require the proposed answer to match the plurality answer. Those behaviors are intentionally not copied.
+R-Zero's original evaluator computes agreement over only extracted answers. v0.2 follows its non-gating treatment of the proposed answer, while deliberately keeping the stricter fixed denominator of nine.
 
 ## R-Q-Evolve ideas retained and tightened
 
@@ -33,7 +33,7 @@ The following are v0.2 contracts rather than runtime dependencies on either refe
 
 - two-parent problem crossover rather than program mutation;
 - exactly 32 pair prompts with two children each for the initial generation budget;
-- fixed-denominator pseudo-label confidence plus proposed-answer agreement;
+- fixed-denominator pseudo-label confidence with proposed-answer agreement retained only for audit;
 - an append-only all-accepted problem catalog and a rebuildable MAP index;
 - typed, data-only verifier contracts for expression, Boolean, and finite-set answers;
 - strict separation of label rollouts, score observations, and replay payloads;

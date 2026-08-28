@@ -49,10 +49,10 @@ For each candidate:
 3. Keep the denominator equal to nine. A completed response with a missing, invalid, or ungradeable boxed answer contributes no vote but still occupies a denominator slot. Transport timeout, worker loss, truncation at the token cap, or another infrastructure failure rejects or reruns the whole label group; it never creates a smaller denominator.
 4. Build equivalence clusters using symmetric, hard-timeout grading. A non-transitive equivalence graph, tied largest clusters, or grader failure causes abstention.
 5. Require a unique cluster of at least five answers, so `agreement >= 5/9`.
-6. Require the crossover model's proposed answer to grade equivalent to the pseudo-gold representative.
+6. Record whether the crossover model's proposed answer grades equivalent to the pseudo-gold representative, but do not use that audit result as an admission gate.
 7. Reject proof-only, damaged, underspecified, unsafe, or unsupported-output questions.
 
-After infrastructure retries are exhausted or a semantic verdict is reached, persist exactly one terminal record in `label_observations.jsonl`. The row is keyed by `label_observation_id`, candidate, and iteration and contains the nine-rollout evidence, cluster sizes, agreement, proposed-answer match, acceptance flag, and reason. Both accepted and rejected terminal observations are retained. With `archive.store_rollout_text: false`, response bodies are blanked but the verdict metadata remains; the supplied production configs keep them.
+After infrastructure retries are exhausted or a semantic verdict is reached, persist exactly one terminal record in `label_observations.jsonl`. The row is keyed by `label_observation_id`, candidate, and iteration and contains the nine-rollout evidence, cluster sizes, agreement, non-gating proposed-answer match audit, acceptance flag, and reason. Both accepted and rejected terminal observations are retained. With `archive.store_rollout_text: false`, response bodies are blanked but the verdict metadata remains; the supplied production configs keep them.
 
 Novelty is checked against both parents, the accepted catalog, and earlier survivors in the same cycle. It combines normalized exact equality, template/skeleton similarity, shingle or SimHash candidate lookup, and a final high-similarity comparison. Accepted candidates are inserted into the live novelty index immediately, preventing siblings from bypassing the check together.
 
