@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import copy
 from typing import Any, Protocol, Sequence
 
 
@@ -88,7 +89,22 @@ def merge_generated_groups(
         concat = getattr(type(payloads[0]), "concat", None)
         if concat is None or any(type(row) is not type(payloads[0]) for row in payloads):
             raise TypeError("native generation fragments cannot be concatenated")
-        payload = concat(payloads)
+        # VERL adds request-local timing information to DataProto.meta_info.
+        # Refill fragments necessarily have different timings, while timing is
+        # not part of the replay payload.  DataProto.concat requires every
+        # meta_info value to be identical, so remove only this non-semantic
+        # field before concatenation.  All other metadata remains strict.
+        normalized: list[Any] = []
+        for row in payloads:
+            meta_info = getattr(row, "meta_info", None)
+            if isinstance(meta_info, dict) and "timing" in meta_info:
+                cloned = copy.copy(row)
+                cloned.meta_info = dict(meta_info)
+                cloned.meta_info.pop("timing", None)
+                normalized.append(cloned)
+            else:
+                normalized.append(row)
+        payload = concat(normalized)
     fingerprints = {
         group.prompt_fingerprint for group in fragments if group.prompt_fingerprint
     }

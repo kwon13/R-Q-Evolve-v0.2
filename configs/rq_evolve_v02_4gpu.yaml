@@ -61,7 +61,7 @@ frontier:
   selection_lag: 1
   warmup_use_current_score: false
   skip_update_when_short: true
-  update_before_discovery: true
+  update_before_discovery: false
   remeasure_budget: 64
   max_per_cell_per_batch: 8
 
