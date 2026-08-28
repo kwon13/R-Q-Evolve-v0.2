@@ -6,6 +6,6 @@ __pycache__/
 .raytmp/
 logs/
 outputs/
-# rq_output/
+rq_output/
 wandb/
 *.log
