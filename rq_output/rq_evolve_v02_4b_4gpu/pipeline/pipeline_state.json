@@ -1,11 +1,11 @@
 {
-  "active_cycle_id": "cycle_376c5fc6cc87ddeba635",
+  "active_cycle_id": "cycle_f4557b1f0dcd7e07b1b3",
   "active_training_batch_id": null,
   "checkpoint_event_hash": "",
   "checkpoint_event_offset": 0,
   "checkpoint_step": 0,
   "global_step": 0,
-  "iteration": 0,
+  "iteration": 1,
   "phase": "discovery",
   "policy_version": 0,
   "schema_version": "concrete-problem-map-v1"
