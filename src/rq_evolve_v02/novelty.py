@@ -49,6 +49,38 @@ def _jaccard(left: set[str], right: set[str]) -> float:
     return len(left & right) / len(union) if union else 0.0
 
 
+def question_similarity(
+    left: str, right: str, *, min_shared_shingles: int = 8
+) -> dict[str, float | int]:
+    """Return deterministic lexical similarity metrics for two questions."""
+
+    sequence = SequenceMatcher(
+        None,
+        normalized_question(left),
+        normalized_question(right),
+        autojunk=False,
+    ).ratio()
+    left_shingles = _shingles(template_question(left))
+    right_shingles = _shingles(template_question(right))
+    shared_shingles = len(left_shingles & right_shingles)
+    shingle_jaccard = _jaccard(left_shingles, right_shingles)
+    shingle_overlap = (
+        shared_shingles / min(len(left_shingles), len(right_shingles))
+        if left_shingles and right_shingles
+        else 0.0
+    )
+    guarded_overlap = (
+        shingle_overlap if shared_shingles >= min_shared_shingles else 0.0
+    )
+    return {
+        "sequence": sequence,
+        "shingle_jaccard": shingle_jaccard,
+        "shingle_overlap": shingle_overlap,
+        "shared_shingles": shared_shingles,
+        "maximum": max(sequence, shingle_jaccard, guarded_overlap),
+    }
+
+
 @dataclass(slots=True)
 class NoveltyDecision:
     accepted: bool
@@ -56,6 +88,11 @@ class NoveltyDecision:
     nearest_problem_id: str | None
     nearest_similarity: float
     parent_max_similarity: float
+    parent_max_containment: float
+    parent_max_containment_shared_shingles: int
+    parent_similarities: list[float]
+    parent_containments: list[float]
+    parent_shared_shingles: list[int]
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -102,14 +139,66 @@ class NoveltyIndex:
         parent_questions: list[str],
         near_threshold: float,
         parent_ceiling: float,
+        parent_containment_ceiling: float,
+        parent_containment_min_shared_shingles: int,
     ) -> NoveltyDecision:
         text = normalized_question(question)
-        if text in self._exact:
+        candidate_shingles = _shingles(template_question(question))
+        parent_similarities: list[float] = []
+        parent_containments: list[float] = []
+        parent_shared_shingles: list[int] = []
+        for parent in parent_questions:
+            parent_shingles = _shingles(template_question(parent))
+            shared = len(candidate_shingles & parent_shingles)
+            parent_similarities.append(
+                SequenceMatcher(
+                    None, text, normalized_question(parent), autojunk=False
+                ).ratio()
+            )
+            parent_containments.append(
+                shared / len(parent_shingles) if parent_shingles else 0.0
+            )
+            parent_shared_shingles.append(shared)
+        parent_max_similarity = max(parent_similarities, default=0.0)
+        if parent_containments:
+            containment_parent = max(
+                range(len(parent_containments)),
+                key=lambda index: (
+                    parent_containments[index],
+                    parent_shared_shingles[index],
+                    parent_similarities[index],
+                ),
+            )
+            parent_max_containment = parent_containments[containment_parent]
+            parent_containment_shared = parent_shared_shingles[containment_parent]
+        else:
+            parent_max_containment = 0.0
+            parent_containment_shared = 0
+
+        def decision(
+            accepted: bool,
+            reason: str | None,
+            nearest_problem_id: str | None,
+            nearest_similarity: float,
+        ) -> NoveltyDecision:
             return NoveltyDecision(
-                False, "exact_duplicate", self._exact[text], 1.0, 1.0
+                accepted=accepted,
+                reason=reason,
+                nearest_problem_id=nearest_problem_id,
+                nearest_similarity=nearest_similarity,
+                parent_max_similarity=parent_max_similarity,
+                parent_max_containment=parent_max_containment,
+                parent_max_containment_shared_shingles=(
+                    parent_containment_shared
+                ),
+                parent_similarities=parent_similarities,
+                parent_containments=parent_containments,
+                parent_shared_shingles=parent_shared_shingles,
             )
 
-        candidate_shingles = _shingles(template_question(question))
+        if text in self._exact:
+            return decision(False, "exact_duplicate", self._exact[text], 1.0)
+
         nearest_id = None
         nearest = 0.0
         for problem_id in self._shortlist(question):
@@ -122,21 +211,16 @@ class NoveltyIndex:
             similarity = max(jac, ratio)
             if similarity > nearest:
                 nearest, nearest_id = similarity, problem_id
-        parent_max = max(
-            (
-                SequenceMatcher(
-                    None, text, normalized_question(parent), autojunk=False
-                ).ratio()
-                for parent in parent_questions
-            ),
-            default=0.0,
-        )
-        if parent_max >= parent_ceiling:
-            return NoveltyDecision(
-                False, "parent_copy", nearest_id, nearest, parent_max
+        if any(
+            containment >= parent_containment_ceiling
+            and shared >= parent_containment_min_shared_shingles
+            for containment, shared in zip(
+                parent_containments, parent_shared_shingles, strict=True
             )
+        ):
+            return decision(False, "parent_containment", nearest_id, nearest)
+        if parent_max_similarity >= parent_ceiling:
+            return decision(False, "parent_copy", nearest_id, nearest)
         if nearest >= near_threshold:
-            return NoveltyDecision(
-                False, "near_duplicate", nearest_id, nearest, parent_max
-            )
-        return NoveltyDecision(True, None, nearest_id, nearest, parent_max)
+            return decision(False, "near_duplicate", nearest_id, nearest)
+        return decision(True, None, nearest_id, nearest)

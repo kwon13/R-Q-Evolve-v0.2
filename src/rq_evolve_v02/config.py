@@ -64,6 +64,14 @@ class NoveltyConfig:
     exact: bool = True
     near_duplicate_threshold: float = 0.92
     parent_similarity_ceiling: float = 0.94
+    # Directional coverage catches a parent copied into a longer child, which
+    # symmetric edit similarity systematically misses.  The minimum shared
+    # shingle count prevents short generic phrases from tripping the gate.
+    parent_shingle_containment_ceiling: float = 0.85
+    parent_containment_min_shared_shingles: int = 8
+    # Two samples drawn for the same parent pair should be meaningfully
+    # different candidates, not near-identical restatements.
+    sibling_similarity_ceiling: float = 0.82
     min_question_chars: int = 20
     max_question_chars: int = 4000
 
@@ -351,10 +359,34 @@ class AppConfig:
                 "run.max_iterations must exceed total_training_steps to allow "
                 "the discovery-only warmup cycle"
             )
-        if not 0 < self.novelty.near_duplicate_threshold <= 1:
+        if isinstance(self.novelty.near_duplicate_threshold, bool) or not (
+            0 < self.novelty.near_duplicate_threshold <= 1
+        ):
             raise ValueError("near_duplicate_threshold must be in (0, 1]")
-        if not 0 < self.novelty.parent_similarity_ceiling <= 1:
+        if isinstance(self.novelty.parent_similarity_ceiling, bool) or not (
+            0 < self.novelty.parent_similarity_ceiling <= 1
+        ):
             raise ValueError("parent_similarity_ceiling must be in (0, 1]")
+        if isinstance(
+            self.novelty.parent_shingle_containment_ceiling, bool
+        ) or not (0 < self.novelty.parent_shingle_containment_ceiling <= 1):
+            raise ValueError(
+                "parent_shingle_containment_ceiling must be in (0, 1]"
+            )
+        if (
+            isinstance(self.novelty.parent_containment_min_shared_shingles, bool)
+            or not isinstance(
+                self.novelty.parent_containment_min_shared_shingles, int
+            )
+            or self.novelty.parent_containment_min_shared_shingles < 1
+        ):
+            raise ValueError(
+                "parent_containment_min_shared_shingles must be a positive integer"
+            )
+        if isinstance(self.novelty.sibling_similarity_ceiling, bool) or not (
+            0 < self.novelty.sibling_similarity_ceiling <= 1
+        ):
+            raise ValueError("sibling_similarity_ceiling must be in (0, 1]")
         if self.novelty.min_question_chars < 1 or (
             self.novelty.max_question_chars < self.novelty.min_question_chars
         ):

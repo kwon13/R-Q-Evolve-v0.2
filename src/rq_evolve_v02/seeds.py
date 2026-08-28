@@ -7,8 +7,12 @@ from pathlib import Path
 
 from .concepts import DOMAINS, PROBLEM_TYPES, validate_cell
 from .models import ProblemRecord
-from .problem_type import annotate_problem_type
-from .verifier import normalize_verifier
+from .problem_type import (
+    annotate_problem_type,
+    answer_contract_error,
+    verifier_for_problem_type,
+)
+from .verifier import normalize_verifier, verifier_for_answer
 
 
 def load_seed_records(path: str | Path) -> list[ProblemRecord]:
@@ -41,7 +45,24 @@ def load_seed_records(path: str | Path) -> list[ProblemRecord]:
                 f"seed {record.problem_id} statement type {annotation.problem_type!r} "
                 f"does not match {record.problem_type!r}"
             )
+        for name, answer in (
+            ("proposed_answer", record.proposed_answer),
+            ("pseudo_gold", record.pseudo_gold),
+        ):
+            answer_error = answer_contract_error(record.problem_type, answer)
+            if answer_error is not None:
+                raise ValueError(
+                    f"seed {record.problem_id} {name} violates its output contract: "
+                    f"{answer_error}"
+                )
         record.verifier = normalize_verifier(record.verifier, answer=record.pseudo_gold)
+        expected_mode = verifier_for_problem_type(record.problem_type)["mode"]
+        expected_verifier = verifier_for_answer(expected_mode, record.pseudo_gold)
+        if record.verifier != expected_verifier:
+            raise ValueError(
+                f"seed {record.problem_id} verifier does not match its "
+                f"{record.problem_type} answer contract"
+            )
         if not record.lineage_root_ids:
             record.lineage_root_ids = (record.problem_id,)
         seen.add(record.problem_id)

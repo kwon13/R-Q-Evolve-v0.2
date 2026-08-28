@@ -51,6 +51,9 @@ novelty:
   exact: true
   near_duplicate_threshold: 0.92
   parent_similarity_ceiling: 0.94
+  parent_shingle_containment_ceiling: 0.85
+  parent_containment_min_shared_shingles: 8
+  sibling_similarity_ceiling: 0.82
   min_question_chars: 20
   max_question_chars: 4000
 

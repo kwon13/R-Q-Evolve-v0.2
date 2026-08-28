@@ -127,3 +127,38 @@ def test_shipped_gpu_configs_obey_fixed_contract() -> None:
         # Python-worker process storm before model loading begins.
         assert config.verl_config["ray_init"]["num_cpus"] == 16
         assert config.verl_config["ray_init"]["object_store_memory"] == 16 * 1024**3
+        assert config.novelty.parent_shingle_containment_ceiling == 0.85
+        assert config.novelty.parent_containment_min_shared_shingles == 8
+        assert config.novelty.sibling_similarity_ceiling == 0.82
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("near_duplicate_threshold", True, "near_duplicate_threshold"),
+        ("parent_similarity_ceiling", True, "parent_similarity_ceiling"),
+        ("parent_shingle_containment_ceiling", 0.0, "containment_ceiling"),
+        ("parent_shingle_containment_ceiling", 1.1, "containment_ceiling"),
+        ("parent_shingle_containment_ceiling", True, "containment_ceiling"),
+        ("sibling_similarity_ceiling", 0.0, "sibling_similarity_ceiling"),
+        ("sibling_similarity_ceiling", 1.1, "sibling_similarity_ceiling"),
+        ("sibling_similarity_ceiling", True, "sibling_similarity_ceiling"),
+        (
+            "parent_containment_min_shared_shingles",
+            0,
+            "min_shared_shingles",
+        ),
+        (
+            "parent_containment_min_shared_shingles",
+            True,
+            "min_shared_shingles",
+        ),
+    ],
+)
+def test_novelty_gate_thresholds_are_validated(
+    field: str, value: object, message: str
+) -> None:
+    assert_invalid(
+        lambda config: setattr(config.novelty, field, value),
+        message,
+    )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
@@ -11,10 +12,21 @@ from .config import AppConfig
 from .domain import label_domains
 from .grading import GraderClient
 from .labeling import build_pseudo_label
-from .models import Candidate, CandidateEvent, LabelEvidence, ParentPair, ProblemRecord
-from .novelty import NoveltyDecision, NoveltyIndex
+from .models import (
+    Candidate,
+    CandidateEvent,
+    DomainEvidence,
+    LabelEvidence,
+    ParentPair,
+    ProblemRecord,
+)
+from .novelty import NoveltyDecision, NoveltyIndex, question_similarity
 from .output_parser import parse_problem_response
-from .problem_type import annotate_problem_type, verifier_for_problem_type
+from .problem_type import (
+    annotate_problem_type,
+    answer_contract_error,
+    verifier_for_problem_type,
+)
 from .prompts import PromptBook
 from .storage import RunStore
 from .utils import canonical_text, stable_id
@@ -27,22 +39,27 @@ class CandidateDraft:
     problem_type: str
     preliminary_verifier: dict[str, Any]
     preliminary_novelty: NoveltyDecision
+    wave_novelty: dict[str, Any]
 
 
 @dataclass(slots=True)
 class DiscoveryWaveResult:
     generated: int
     parsed: int
-    label_accepted: int
+    preflight_accepted: int
     domain_accepted: int
+    wave_novelty_accepted: int
+    label_accepted: int
     archived: list[ProblemRecord]
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "generated": self.generated,
             "parsed": self.parsed,
-            "label_accepted": self.label_accepted,
+            "preflight_accepted": self.preflight_accepted,
             "domain_accepted": self.domain_accepted,
+            "wave_novelty_accepted": self.wave_novelty_accepted,
+            "label_accepted": self.label_accepted,
             "archived_problem_ids": [record.problem_id for record in self.archived],
         }
 
@@ -79,6 +96,8 @@ class DiscoveryRunner:
         identity: tuple[Any, ...],
         details: dict[str, Any] | None = None,
     ) -> None:
+        event_details = {"wave_index": wave_index}
+        event_details.update(details or {})
         self.store.append_event(
             CandidateEvent(
                 event_id=stable_id(
@@ -89,7 +108,7 @@ class DiscoveryRunner:
                 phase=phase,
                 status=status,
                 reason=reason,
-                details=details or {},
+                details=event_details,
             )
         )
 
@@ -99,6 +118,31 @@ class DiscoveryRunner:
                 "policy identity changed during the frozen discovery cycle"
             )
 
+    @staticmethod
+    def _group_diagnostics(
+        group: GeneratedGroup, *, requested: int
+    ) -> dict[str, Any]:
+        statuses = Counter(sample.status for sample in group.samples)
+        reasons = Counter(
+            sample.reject_reason or "none" for sample in group.samples
+        )
+        return {
+            "requested": requested,
+            "received": len(group.samples),
+            "status_counts": dict(sorted(statuses.items())),
+            "reject_reason_counts": dict(sorted(reasons.items())),
+            "samples": [
+                {
+                    "sample_index": index,
+                    "status": sample.status,
+                    "reject_reason": sample.reject_reason,
+                    "response_chars": len(sample.text),
+                    "has_boxed_answer": r"\boxed{" in sample.text,
+                }
+                for index, sample in enumerate(group.samples)
+            ],
+        }
+
     def _generate_drafts(
         self,
         *,
@@ -106,7 +150,7 @@ class DiscoveryRunner:
         wave_index: int,
         pairs: list[ParentPair],
         frozen: PolicyIdentity,
-    ) -> tuple[int, list[CandidateDraft]]:
+    ) -> tuple[int, int, list[CandidateDraft]]:
         cfg = self.config
         messages: list[list[dict[str, str]]] = []
         request_ids: list[str] = []
@@ -143,6 +187,7 @@ class DiscoveryRunner:
         if len(output_by_id) != len(groups):
             raise RuntimeError("crossover backend returned duplicate request IDs")
         generated = 0
+        parsed_count = 0
         drafts: list[CandidateDraft] = []
         for request_id in request_ids:
             pair = pair_by_request[request_id]
@@ -190,12 +235,20 @@ class DiscoveryRunner:
                     self._event(
                         iteration=iteration,
                         wave_index=wave_index,
-                        phase="parse",
+                        phase="generation",
                         status="rejected",
                         reason=sample.reject_reason or "generation_rejected",
                         candidate_id=attempt_id,
                         identity=identity,
-                        details={"raw_response": sample.text},
+                        details={
+                            "pair_id": pair.pair_id,
+                            "request_id": request_id,
+                            "child_index": child_index,
+                            "sample_status": sample.status,
+                            "sample_reject_reason": sample.reject_reason,
+                            "response_chars": len(sample.text),
+                            "raw_response": sample.text,
+                        },
                     )
                     continue
                 parsed, parse_error = parse_problem_response(sample.text)
@@ -212,6 +265,20 @@ class DiscoveryRunner:
                     )
                     continue
                 question = canonical_text(parsed.question)
+                parsed_count += 1
+                self._event(
+                    iteration=iteration,
+                    wave_index=wave_index,
+                    phase="parse",
+                    status="passed",
+                    reason=None,
+                    candidate_id=attempt_id,
+                    identity=identity,
+                    details={
+                        "question": question,
+                        "proposed_answer": parsed.answer,
+                    },
+                )
                 if (
                     not cfg.novelty.min_question_chars
                     <= len(question)
@@ -256,6 +323,25 @@ class DiscoveryRunner:
                         },
                     )
                     continue
+                answer_error = answer_contract_error(
+                    annotation.problem_type, parsed.answer
+                )
+                if answer_error is not None:
+                    self._event(
+                        iteration=iteration,
+                        wave_index=wave_index,
+                        phase="answer_contract",
+                        status="rejected",
+                        reason=answer_error,
+                        candidate_id=attempt_id,
+                        identity=identity,
+                        details={
+                            "problem_type": annotation.problem_type,
+                            "proposed_answer": parsed.answer,
+                            "question": question,
+                        },
+                    )
+                    continue
                 left = self.archive.records[pair.left_id]
                 right = self.archive.records[pair.right_id]
                 novelty = self.novelty.check(
@@ -263,6 +349,12 @@ class DiscoveryRunner:
                     parent_questions=[left.question, right.question],
                     near_threshold=cfg.novelty.near_duplicate_threshold,
                     parent_ceiling=cfg.novelty.parent_similarity_ceiling,
+                    parent_containment_ceiling=(
+                        cfg.novelty.parent_shingle_containment_ceiling
+                    ),
+                    parent_containment_min_shared_shingles=(
+                        cfg.novelty.parent_containment_min_shared_shingles
+                    ),
                 )
                 if not novelty.accepted:
                     self._event(
@@ -273,7 +365,26 @@ class DiscoveryRunner:
                         reason=novelty.reason,
                         candidate_id=attempt_id,
                         identity=identity,
-                        details={"novelty": novelty.to_dict(), "question": question},
+                        details={
+                            "pair_id": pair.pair_id,
+                            "parent_ids": [pair.left_id, pair.right_id],
+                            "question": question,
+                            "novelty": novelty.to_dict(),
+                            "thresholds": {
+                                "near_duplicate": (
+                                    cfg.novelty.near_duplicate_threshold
+                                ),
+                                "parent_similarity": (
+                                    cfg.novelty.parent_similarity_ceiling
+                                ),
+                                "parent_containment": (
+                                    cfg.novelty.parent_shingle_containment_ceiling
+                                ),
+                                "parent_min_shared_shingles": (
+                                    cfg.novelty.parent_containment_min_shared_shingles
+                                ),
+                            },
+                        },
                     )
                     continue
                 candidate = Candidate(
@@ -294,22 +405,142 @@ class DiscoveryRunner:
                             annotation.problem_type
                         ),
                         preliminary_novelty=novelty,
+                        wave_novelty={},
                     )
                 )
                 self._event(
                     iteration=iteration,
                     wave_index=wave_index,
-                    phase="parse",
-                    status="accepted",
+                    phase="preflight",
+                    status="passed",
                     reason=None,
                     candidate_id=attempt_id,
                     identity=identity,
                     details={
                         "candidate": candidate.to_dict(),
                         "problem_type": annotation.problem_type,
+                        "preliminary_novelty": novelty.to_dict(),
                     },
                 )
-        return generated, drafts
+        return generated, parsed_count, drafts
+
+    def _filter_wave_novelty(
+        self,
+        drafts: list[CandidateDraft],
+        *,
+        domains: dict[str, DomainEvidence],
+        iteration: int,
+        wave_index: int,
+    ) -> list[CandidateDraft]:
+        """Keep one deterministic representative from each near-duplicate cluster.
+
+        Domain filtering happens first so a rejected first sample cannot suppress
+        a valid sibling.  Representatives with less parent content are preferred;
+        the returned order still follows the backend's stable candidate order.
+        """
+
+        cfg = self.config.novelty
+        ranked = sorted(
+            drafts,
+            key=lambda draft: (
+                draft.preliminary_novelty.parent_max_containment,
+                draft.preliminary_novelty.parent_max_similarity,
+                -domains[draft.candidate.candidate_id].logit_margin,
+                -domains[draft.candidate.candidate_id].top_probability,
+                draft.candidate.child_index,
+                draft.candidate.candidate_id,
+            ),
+        )
+        kept: list[CandidateDraft] = []
+        kept_ids: set[str] = set()
+        for draft in ranked:
+            candidate = draft.candidate
+            comparisons: list[dict[str, Any]] = []
+            for other in kept:
+                same_pair = candidate.pair_id == other.candidate.pair_id
+                threshold = (
+                    cfg.sibling_similarity_ceiling
+                    if same_pair
+                    else cfg.near_duplicate_threshold
+                )
+                metrics = question_similarity(
+                    candidate.question,
+                    other.candidate.question,
+                    min_shared_shingles=(
+                        cfg.parent_containment_min_shared_shingles
+                    ),
+                )
+                comparisons.append(
+                    {
+                        "nearest_candidate_id": other.candidate.candidate_id,
+                        "scope": "same_pair" if same_pair else "wave",
+                        "threshold": threshold,
+                        **metrics,
+                    }
+                )
+            violations = [
+                row for row in comparisons if row["maximum"] >= row["threshold"]
+            ]
+            if violations:
+                evidence = max(
+                    violations,
+                    key=lambda row: row["maximum"] / row["threshold"],
+                )
+                reason = (
+                    "sibling_near_duplicate"
+                    if evidence["scope"] == "same_pair"
+                    else "wave_near_duplicate"
+                )
+                self._event(
+                    iteration=iteration,
+                    wave_index=wave_index,
+                    phase="wave_novelty",
+                    status="rejected",
+                    reason=reason,
+                    candidate_id=candidate.candidate_id,
+                    identity=(candidate.candidate_id,),
+                    details={
+                        "pair_id": candidate.pair_id,
+                        "question": candidate.question,
+                        "wave_novelty": evidence,
+                    },
+                )
+                continue
+            evidence = (
+                max(comparisons, key=lambda row: row["maximum"])
+                if comparisons
+                else {
+                    "nearest_candidate_id": None,
+                    "scope": None,
+                    "threshold": cfg.sibling_similarity_ceiling,
+                    "sequence": 0.0,
+                    "shingle_jaccard": 0.0,
+                    "shingle_overlap": 0.0,
+                    "shared_shingles": 0,
+                    "maximum": 0.0,
+                }
+            )
+            draft.wave_novelty = evidence
+            kept.append(draft)
+            kept_ids.add(candidate.candidate_id)
+            self._event(
+                iteration=iteration,
+                wave_index=wave_index,
+                phase="wave_novelty",
+                status="passed",
+                reason=None,
+                candidate_id=candidate.candidate_id,
+                identity=(candidate.candidate_id,),
+                details={
+                    "pair_id": candidate.pair_id,
+                    "wave_novelty": evidence,
+                },
+            )
+        return [
+            draft
+            for draft in drafts
+            if draft.candidate.candidate_id in kept_ids
+        ]
 
     def _label_drafts(
         self,
@@ -387,10 +618,9 @@ class DiscoveryRunner:
                         details={
                             "attempt": attempt,
                             "request_id": group.request_id,
-                            "received": len(group.samples),
-                            "sample_statuses": [
-                                sample.status for sample in group.samples
-                            ],
+                            "rollout_group": self._group_diagnostics(
+                                group, requested=cfg.num_rollouts
+                            ),
                         },
                     )
                     retry.append(draft)
@@ -425,6 +655,9 @@ class DiscoveryRunner:
                         "agreement": evidence.agreement,
                         "proposed_matches": evidence.proposed_matches,
                         "attempt": attempt,
+                        "rollout_group": self._group_diagnostics(
+                            group, requested=cfg.num_rollouts
+                        ),
                     },
                 )
                 if evidence.accepted:
@@ -440,22 +673,24 @@ class DiscoveryRunner:
         pairs: list[ParentPair],
         frozen: PolicyIdentity,
     ) -> DiscoveryWaveResult:
-        generated, drafts = self._generate_drafts(
+        generated, parsed_count, drafts = self._generate_drafts(
             iteration=iteration,
             wave_index=wave_index,
             pairs=pairs,
             frozen=frozen,
         )
-        labeled = self._label_drafts(
-            drafts,
-            iteration=iteration,
-            wave_index=wave_index,
-            frozen=frozen,
-        )
-        if not labeled:
-            return DiscoveryWaveResult(generated, len(drafts), 0, 0, [])
-        evidence = label_domains(
-            [draft.candidate.question for draft, _ in labeled],
+        if not drafts:
+            return DiscoveryWaveResult(
+                generated=generated,
+                parsed=parsed_count,
+                preflight_accepted=0,
+                domain_accepted=0,
+                wave_novelty_accepted=0,
+                label_accepted=0,
+                archived=[],
+            )
+        domain_evidence = label_domains(
+            [draft.candidate.question for draft in drafts],
             backend=self.backend,
             prompts=self.prompts,
             min_probability=self.config.domain.min_probability,
@@ -464,9 +699,9 @@ class DiscoveryRunner:
             request_namespace=f"wave-{wave_index}",
         )
         self._assert_policy(frozen)
-        archived: list[ProblemRecord] = []
-        domain_accepted = 0
-        for (draft, label), domain in zip(labeled, evidence, strict=True):
+        domain_drafts: list[CandidateDraft] = []
+        domain_by_candidate: dict[str, DomainEvidence] = {}
+        for draft, domain in zip(drafts, domain_evidence, strict=True):
             candidate = draft.candidate
             if not domain.accepted or domain.domain is None:
                 self._event(
@@ -480,8 +715,74 @@ class DiscoveryRunner:
                     details={"domain_evidence": domain.to_dict()},
                 )
                 continue
-            domain_accepted += 1
+            domain_drafts.append(draft)
+            domain_by_candidate[candidate.candidate_id] = domain
+            self._event(
+                iteration=iteration,
+                wave_index=wave_index,
+                phase="domain",
+                status="passed",
+                reason=None,
+                candidate_id=candidate.candidate_id,
+                identity=(candidate.candidate_id,),
+                details={"domain_evidence": domain.to_dict()},
+            )
+        if not domain_drafts:
+            return DiscoveryWaveResult(
+                generated=generated,
+                parsed=parsed_count,
+                preflight_accepted=len(drafts),
+                domain_accepted=0,
+                wave_novelty_accepted=0,
+                label_accepted=0,
+                archived=[],
+            )
+        label_drafts = self._filter_wave_novelty(
+            domain_drafts,
+            domains=domain_by_candidate,
+            iteration=iteration,
+            wave_index=wave_index,
+        )
+        labeled = self._label_drafts(
+            label_drafts,
+            iteration=iteration,
+            wave_index=wave_index,
+            frozen=frozen,
+        )
+        if not labeled:
+            return DiscoveryWaveResult(
+                generated=generated,
+                parsed=parsed_count,
+                preflight_accepted=len(drafts),
+                domain_accepted=len(domain_drafts),
+                wave_novelty_accepted=len(label_drafts),
+                label_accepted=0,
+                archived=[],
+            )
+        archived: list[ProblemRecord] = []
+        for draft, label in labeled:
+            candidate = draft.candidate
+            domain = domain_by_candidate[candidate.candidate_id]
+            assert domain.domain is not None
             assert label.pseudo_gold is not None
+            final_answer_error = answer_contract_error(
+                draft.problem_type, label.pseudo_gold
+            )
+            if final_answer_error is not None:
+                self._event(
+                    iteration=iteration,
+                    wave_index=wave_index,
+                    phase="answer_contract",
+                    status="rejected",
+                    reason=f"pseudo_gold_{final_answer_error}",
+                    candidate_id=candidate.candidate_id,
+                    identity=(candidate.candidate_id,),
+                    details={
+                        "problem_type": draft.problem_type,
+                        "pseudo_gold": label.pseudo_gold,
+                    },
+                )
+                continue
             try:
                 verifier = verifier_for_answer(
                     draft.preliminary_verifier["mode"], label.pseudo_gold
@@ -507,6 +808,12 @@ class DiscoveryRunner:
                 parent_questions=[left.question, right.question],
                 near_threshold=self.config.novelty.near_duplicate_threshold,
                 parent_ceiling=self.config.novelty.parent_similarity_ceiling,
+                parent_containment_ceiling=(
+                    self.config.novelty.parent_shingle_containment_ceiling
+                ),
+                parent_containment_min_shared_shingles=(
+                    self.config.novelty.parent_containment_min_shared_shingles
+                ),
             )
             if not final_novelty.accepted:
                 self._event(
@@ -517,7 +824,25 @@ class DiscoveryRunner:
                     reason=final_novelty.reason,
                     candidate_id=candidate.candidate_id,
                     identity=(candidate.candidate_id,),
-                    details={"novelty": final_novelty.to_dict()},
+                    details={
+                        "pair_id": candidate.pair_id,
+                        "parent_ids": list(candidate.parent_ids),
+                        "novelty": final_novelty.to_dict(),
+                        "thresholds": {
+                            "near_duplicate": (
+                                self.config.novelty.near_duplicate_threshold
+                            ),
+                            "parent_similarity": (
+                                self.config.novelty.parent_similarity_ceiling
+                            ),
+                            "parent_containment": (
+                                self.config.novelty.parent_shingle_containment_ceiling
+                            ),
+                            "parent_min_shared_shingles": (
+                                self.config.novelty.parent_containment_min_shared_shingles
+                            ),
+                        },
+                    },
                 )
                 continue
             problem_id = stable_id(
@@ -562,7 +887,10 @@ class DiscoveryRunner:
                     "source_checkpoint": label.source_checkpoint,
                 },
                 domain_evidence=domain.to_dict(),
-                novelty=final_novelty.to_dict(),
+                novelty={
+                    **final_novelty.to_dict(),
+                    "wave": draft.wave_novelty,
+                },
             )
             # Single-writer transaction order: append the accepted source row,
             # then expose it through the in-memory/index projections.
@@ -596,8 +924,10 @@ class DiscoveryRunner:
             )
         return DiscoveryWaveResult(
             generated=generated,
-            parsed=len(drafts),
+            parsed=parsed_count,
+            preflight_accepted=len(drafts),
+            domain_accepted=len(domain_drafts),
+            wave_novelty_accepted=len(label_drafts),
             label_accepted=len(labeled),
-            domain_accepted=domain_accepted,
             archived=archived,
         )
