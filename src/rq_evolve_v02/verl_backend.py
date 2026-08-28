@@ -42,6 +42,12 @@ from .training import (
 from .verifier import normalize_verifier
 
 
+def _startup_log(message: str) -> None:
+    """Emit an unbuffered marker around native/Ray startup boundaries."""
+
+    print(f"[v0.2-startup] {message}", flush=True)
+
+
 def _require_verl() -> tuple[Any, Any, Any, Any, Any]:
     try:
         import verl.utils.torch_functional as verl_F
@@ -924,6 +930,13 @@ def build_verl_runtime(
             )
         )
         ray_tmp.mkdir(parents=True, exist_ok=True)
+        ray_num_cpus = int(ray_cfg["num_cpus"])
+        object_store_memory = int(ray_cfg["object_store_memory"])
+        _startup_log(
+            "initializing Ray "
+            f"(num_cpus={ray_num_cpus}, "
+            f"object_store_memory={object_store_memory}, temp={ray_tmp})"
+        )
         ray.init(
             runtime_env={
                 "env_vars": {
@@ -936,17 +949,22 @@ def build_verl_runtime(
                     + os.environ.get("PYTHONPATH", ""),
                 }
             },
-            num_cpus=ray_cfg.get("num_cpus", None),
+            num_cpus=ray_num_cpus,
+            object_store_memory=object_store_memory,
             _temp_dir=str(ray_tmp),
         )
+        _startup_log("Ray initialized")
 
+    _startup_log("loading tokenizer and processor")
     tokenizer, processor = _build_tokenizer_and_processor(verl_config)
+    _startup_log("tokenizer and processor ready")
     train_dataset = ResidentReplayDataset(training_groups=training_groups)
     val_dataset = _StaticValidationDataset()
     try:
         from torch.utils.data import SequentialSampler
     except ImportError as exc:  # pragma: no cover - VERL requires torch
         raise RuntimeError("torch is required for VERL training") from exc
+    _startup_log("constructing RayPPOTrainer")
     trainer = _build_ray_ppo_trainer(
         verl_config,
         tokenizer=tokenizer,
@@ -955,7 +973,9 @@ def build_verl_runtime(
         val_dataset=val_dataset,
         train_sampler=SequentialSampler(train_dataset),
     )
+    _startup_log("RayPPOTrainer constructed; initializing workers")
     trainer.init_workers()
+    _startup_log("VERL workers initialized")
     initial_identity = PolicyIdentity(
         run_uuid=str(run_uuid),
         policy_version=0,
@@ -993,7 +1013,9 @@ def build_verl_runtime(
         verl_config=verl_config,
     )
     if start_fit_loop:
+        _startup_log("starting resident VERL fit loop")
         training_backend.start()
+        _startup_log("resident VERL fit loop ready")
     return runtime
 
 

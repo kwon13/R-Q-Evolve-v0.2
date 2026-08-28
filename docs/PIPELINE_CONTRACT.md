@@ -140,3 +140,8 @@ python patches/verl_agent_loop_sampling.py
 ```
 
 It makes the installed async agent-loop worker honor each `DataProto.meta_info` override for temperature, top-p, top-k, maximum tokens, log probabilities, and allowed token IDs. This is load-bearing for sharing one resident worker among crossover, nine-rollout labeling, eight-rollout scoring, and calibrated one-token domain classification. Preflight verifies the marker and fails before Ray reserves GPUs when the patch is absent. An unknown VERL source anchor is an error, not permission to continue unpatched.
+
+Production configs must also give Ray explicit positive `num_cpus` and
+`object_store_memory` values. Host-wide auto-detection is forbidden: on a
+large shared server it can eagerly create hundreds of Python workers and
+reserve an unnecessarily large object store before model initialization.

@@ -55,6 +55,13 @@ bash scripts/run_train_8gpu.sh --gpus 0,1,2,3,4,5,6,7 --detach
 
 The launchers first apply the required async-VERL per-call sampling patch idempotently, then run the same CLI preflight used by manual operation. The patch preserves a `.orig` backup of the installed VERL source. Detached processes have one explicit PID file and one timestamped log; the scripts never use `pkill` or terminate an existing process.
 
+The shipped configs deliberately cap Ray at 16 logical CPUs and a 16 GiB
+object store. Leaving `ray_init.num_cpus` unset on large servers makes Ray
+eagerly prestart one Python worker per host CPU before VERL loads the model.
+Launchers also enable Python's fault handler, and the runtime emits unbuffered
+startup markers around Ray, tokenizer, trainer, worker, and resident-fit
+initialization so native failures retain a precise last completed boundary.
+
 Equivalent manual commands are:
 
 ```bash

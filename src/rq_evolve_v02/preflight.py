@@ -110,6 +110,9 @@ def run_preflight(config: AppConfig, *, project_root: str | Path) -> dict[str, A
             raise ValueError("new auto-resume run has a non-empty checkpoint directory")
         report["checkpoint_dir"] = str(checkpoint_dir)
         report["resume_mode"] = config.training.resume_mode
+        ray_init = config.verl_config.get("ray_init", {}) or {}
+        report["ray_num_cpus"] = int(ray_init["num_cpus"])
+        report["ray_object_store_memory"] = int(ray_init["object_store_memory"])
         applied, target = _verl_patch_status()
         report["verl_sampling_patch"] = {"applied": applied, "target": target}
         if not applied:

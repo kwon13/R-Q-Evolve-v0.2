@@ -318,6 +318,30 @@ class AppConfig:
                 "VERL domain probabilities require rollout.logprobs_mode="
                 "processed_logprobs"
             )
+        if self.backend.kind == "verl" and self.verl_config:
+            ray_num_cpus = _select(self.verl_config, "ray_init.num_cpus")
+            if (
+                isinstance(ray_num_cpus, bool)
+                or not isinstance(ray_num_cpus, int)
+                or ray_num_cpus < self.backend.n_gpus
+            ):
+                raise ValueError(
+                    "verl_config.ray_init.num_cpus must be an explicit integer "
+                    "at least backend.n_gpus; null may eagerly spawn one worker "
+                    "per host CPU"
+                )
+            object_store_memory = _select(
+                self.verl_config, "ray_init.object_store_memory"
+            )
+            if (
+                isinstance(object_store_memory, bool)
+                or not isinstance(object_store_memory, int)
+                or object_store_memory < 1_073_741_824
+            ):
+                raise ValueError(
+                    "verl_config.ray_init.object_store_memory must be an explicit "
+                    "integer of at least 1 GiB"
+                )
         if self.run.schema_version != "concrete-problem-map-v1":
             raise ValueError("unsupported run.schema_version")
         if self.run.max_iterations < 1 or self.training.total_training_steps < 1:

@@ -73,6 +73,41 @@ def test_checkpoint_ownership_is_fixed() -> None:
         config.validate()
 
 
+@pytest.mark.parametrize("num_cpus", [None, True, 0, 3, 3.5])
+def test_verl_ray_cpu_budget_must_be_explicit_and_cover_all_gpus(
+    num_cpus: object,
+) -> None:
+    config = AppConfig()
+    config.backend.n_gpus = 4
+    config.verl_config = {
+        "ray_init": {
+            "num_cpus": num_cpus,
+            "object_store_memory": 16 * 1024**3,
+        }
+    }
+    with pytest.raises(ValueError, match="ray_init.num_cpus"):
+        config.validate()
+
+
+@pytest.mark.parametrize(
+    "object_store_memory",
+    [None, True, 0, 1024**3 - 1, 1.5 * 1024**3],
+)
+def test_verl_ray_object_store_budget_is_explicit_integer_at_least_one_gib(
+    object_store_memory: object,
+) -> None:
+    config = AppConfig()
+    config.backend.n_gpus = 4
+    config.verl_config = {
+        "ray_init": {
+            "num_cpus": 16,
+            "object_store_memory": object_store_memory,
+        }
+    }
+    with pytest.raises(ValueError, match="ray_init.object_store_memory"):
+        config.validate()
+
+
 def test_shipped_gpu_configs_obey_fixed_contract() -> None:
     root = Path(__file__).resolve().parents[1]
     four = load_config(root / "configs" / "rq_evolve_v02_4gpu.yaml")
@@ -87,3 +122,8 @@ def test_shipped_gpu_configs_obey_fixed_contract() -> None:
         assert config.frontier.selection_lag == 1
         assert config.training.save_freq == 0
         assert config.verl_config["trainer"]["save_freq"] == 0
+        # Both launch shapes deliberately share the same bounded Ray driver
+        # budget.  Leaving num_cpus null on a 112-core host eagerly creates a
+        # Python-worker process storm before model loading begins.
+        assert config.verl_config["ray_init"]["num_cpus"] == 16
+        assert config.verl_config["ray_init"]["object_store_memory"] == 16 * 1024**3

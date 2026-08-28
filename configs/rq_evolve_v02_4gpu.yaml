@@ -204,4 +204,10 @@ verl_config:
     resume_mode: disable
 
   ray_init:
-    num_cpus: null
+    # Do not let Ray eagerly prestart one Python worker per host CPU.  The
+    # target servers expose 112+ logical CPUs, which creates a process storm
+    # before VERL reaches model loading.
+    num_cpus: 16
+    # Ray otherwise reserves roughly 30% of host RAM (200 GiB on the observed
+    # server) in a filesystem that is already over 95% full.
+    object_store_memory: 17179869184
