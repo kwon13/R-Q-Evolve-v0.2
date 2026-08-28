@@ -1,0 +1,194 @@
+[
+  {
+    "left_id": "seed_precalculus_optimization",
+    "pair_id": "pair_acc5ceba5945bd1fe223",
+    "prompt_seed": 1457549229,
+    "right_id": "seed_applied_mathematics_function"
+  },
+  {
+    "left_id": "seed_number_theory_counting",
+    "pair_id": "pair_7dceee3b3b647d34056a",
+    "prompt_seed": 724819943,
+    "right_id": "problem_c7485189824600a49d2c"
+  },
+  {
+    "left_id": "problem_bca1fd80b74df70e1a50",
+    "pair_id": "pair_ac0dbb9c23cd0492453f",
+    "prompt_seed": 239562910,
+    "right_id": "seed_number_theory_counting"
+  },
+  {
+    "left_id": "seed_geometry_search",
+    "pair_id": "pair_873dbb52be247c338444",
+    "prompt_seed": 289055538,
+    "right_id": "problem_bca1fd80b74df70e1a50"
+  },
+  {
+    "left_id": "seed_precalculus_optimization",
+    "pair_id": "pair_93440bf0a4440c7bf346",
+    "prompt_seed": 506376948,
+    "right_id": "seed_discrete_mathematics_optimization"
+  },
+  {
+    "left_id": "seed_precalculus_optimization",
+    "pair_id": "pair_bb00034b601f2db4996f",
+    "prompt_seed": 215969244,
+    "right_id": "seed_number_theory_counting"
+  },
+  {
+    "left_id": "seed_calculus_function",
+    "pair_id": "pair_648bc85fa2dac615be2d",
+    "prompt_seed": 2047816244,
+    "right_id": "seed_geometry_search"
+  },
+  {
+    "left_id": "seed_discrete_mathematics_optimization",
+    "pair_id": "pair_1d0cf8a1ca08c0d963a9",
+    "prompt_seed": 2067808426,
+    "right_id": "problem_b0ebfc49b91d49808137"
+  },
+  {
+    "left_id": "problem_39fb4b4249a066963192",
+    "pair_id": "pair_4da26c48623c5550ad94",
+    "prompt_seed": 168687768,
+    "right_id": "seed_geometry_search"
+  },
+  {
+    "left_id": "problem_5ed55f4e432539fac690",
+    "pair_id": "pair_5c624704964575902fd3",
+    "prompt_seed": 1690520,
+    "right_id": "seed_applied_mathematics_function"
+  },
+  {
+    "left_id": "seed_number_theory_counting",
+    "pair_id": "pair_41f86f8f70e1eaf4b9b2",
+    "prompt_seed": 51371434,
+    "right_id": "seed_precalculus_optimization"
+  },
+  {
+    "left_id": "seed_applied_mathematics_function",
+    "pair_id": "pair_7a25790d2b83b1d40baa",
+    "prompt_seed": 1914775917,
+    "right_id": "seed_precalculus_optimization"
+  },
+  {
+    "left_id": "seed_geometry_search",
+    "pair_id": "pair_9e94491b2d39fb7be531",
+    "prompt_seed": 1397859732,
+    "right_id": "seed_number_theory_counting"
+  },
+  {
+    "left_id": "seed_geometry_search",
+    "pair_id": "pair_d43552e6df8f97a43726",
+    "prompt_seed": 1308352144,
+    "right_id": "seed_applied_mathematics_function"
+  },
+  {
+    "left_id": "seed_geometry_search",
+    "pair_id": "pair_c4622da6023cd9d6c9d7",
+    "prompt_seed": 590117994,
+    "right_id": "seed_calculus_function"
+  },
+  {
+    "left_id": "seed_algebra_decision",
+    "pair_id": "pair_e9b808f9b75ccfcce6f6",
+    "prompt_seed": 637338071,
+    "right_id": "seed_discrete_mathematics_optimization"
+  },
+  {
+    "left_id": "seed_discrete_mathematics_optimization",
+    "pair_id": "pair_1dd73d88a4f1fb487274",
+    "prompt_seed": 1224452897,
+    "right_id": "seed_geometry_search"
+  },
+  {
+    "left_id": "seed_applied_mathematics_function",
+    "pair_id": "pair_f08363264d8abe280611",
+    "prompt_seed": 74852320,
+    "right_id": "seed_discrete_mathematics_optimization"
+  },
+  {
+    "left_id": "seed_number_theory_counting",
+    "pair_id": "pair_0b4d0c9f004a0ba7c66a",
+    "prompt_seed": 1524905847,
+    "right_id": "problem_39fb4b4249a066963192"
+  },
+  {
+    "left_id": "problem_bca1fd80b74df70e1a50",
+    "pair_id": "pair_de124a2622f5818ac209",
+    "prompt_seed": 79406850,
+    "right_id": "seed_discrete_mathematics_optimization"
+  },
+  {
+    "left_id": "seed_calculus_function",
+    "pair_id": "pair_31b421ee332e57038c7b",
+    "prompt_seed": 1585768002,
+    "right_id": "seed_algebra_decision"
+  },
+  {
+    "left_id": "problem_39fb4b4249a066963192",
+    "pair_id": "pair_7139cb1ea05c229b8c01",
+    "prompt_seed": 1255475681,
+    "right_id": "seed_algebra_decision"
+  },
+  {
+    "left_id": "seed_number_theory_counting",
+    "pair_id": "pair_c7169b085208a02a60eb",
+    "prompt_seed": 801348195,
+    "right_id": "seed_discrete_mathematics_optimization"
+  },
+  {
+    "left_id": "seed_geometry_search",
+    "pair_id": "pair_83ac49cb6cd155614924",
+    "prompt_seed": 979565938,
+    "right_id": "seed_applied_mathematics_function"
+  },
+  {
+    "left_id": "seed_algebra_decision",
+    "pair_id": "pair_541fda14476138dc3976",
+    "prompt_seed": 413300115,
+    "right_id": "problem_bca1fd80b74df70e1a50"
+  },
+  {
+    "left_id": "seed_algebra_decision",
+    "pair_id": "pair_10df73f7cc68943f3122",
+    "prompt_seed": 1949409001,
+    "right_id": "seed_number_theory_counting"
+  },
+  {
+    "left_id": "seed_geometry_search",
+    "pair_id": "pair_e8cf6204cce66372b4b8",
+    "prompt_seed": 650666350,
+    "right_id": "seed_precalculus_optimization"
+  },
+  {
+    "left_id": "seed_discrete_mathematics_optimization",
+    "pair_id": "pair_d810e27c4c919ff5d367",
+    "prompt_seed": 807288269,
+    "right_id": "problem_5ed55f4e432539fac690"
+  },
+  {
+    "left_id": "seed_geometry_search",
+    "pair_id": "pair_0b7e96f5894394af6196",
+    "prompt_seed": 1828879387,
+    "right_id": "problem_5ed55f4e432539fac690"
+  },
+  {
+    "left_id": "problem_b0ebfc49b91d49808137",
+    "pair_id": "pair_4d13b534563d11847a3b",
+    "prompt_seed": 465679946,
+    "right_id": "seed_geometry_search"
+  },
+  {
+    "left_id": "problem_5ed55f4e432539fac690",
+    "pair_id": "pair_75423b41c8c99e0d8506",
+    "prompt_seed": 2029600476,
+    "right_id": "seed_algebra_decision"
+  },
+  {
+    "left_id": "seed_algebra_decision",
+    "pair_id": "pair_dc62c11eafda792af3b9",
+    "prompt_seed": 2109429538,
+    "right_id": "problem_c7485189824600a49d2c"
+  }
+]

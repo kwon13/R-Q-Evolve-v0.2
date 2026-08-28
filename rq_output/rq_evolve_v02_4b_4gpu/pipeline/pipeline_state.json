@@ -6,7 +6,7 @@
   "checkpoint_step": 0,
   "global_step": 0,
   "iteration": 1,
-  "phase": "scoring",
+  "phase": "discovery",
   "policy_version": 0,
   "schema_version": "concrete-problem-map-v1"
 }
