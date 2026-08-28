@@ -7,7 +7,14 @@ from dataclasses import dataclass
 from typing import Any
 
 from .archive import ConcreteMapArchive
-from .backends import GeneratedGroup, PolicyBackend, PolicyIdentity, SamplingSpec
+from .backends import (
+    GeneratedGroup,
+    PolicyBackend,
+    PolicyIdentity,
+    SamplingSpec,
+    merge_generated_groups,
+    select_generated_samples,
+)
 from .config import AppConfig
 from .grading import GraderClient
 from .labeling import build_pseudo_label
@@ -548,114 +555,148 @@ class DiscoveryRunner:
     ) -> list[tuple[CandidateDraft, LabelEvidence]]:
         cfg = self.config.labeling
         pending = list(drafts)
+        fragments: dict[str, list[GeneratedGroup]] = {
+            draft.candidate.candidate_id: [] for draft in drafts
+        }
         accepted: list[tuple[CandidateDraft, LabelEvidence]] = []
         for attempt in range(cfg.max_infrastructure_retries + 1):
             if not pending:
                 break
-            request_ids = [
-                stable_id(
-                    "label",
-                    frozen.run_uuid,
-                    frozen.policy_version,
-                    iteration,
-                    wave_index,
-                    draft.candidate.candidate_id,
-                    attempt,
-                )
-                for draft in pending
-            ]
-            groups = self.backend.generate(
-                [
-                    self.prompts.solver_messages(draft.candidate.question)
-                    for draft in pending
-                ],
-                request_ids=request_ids,
-                sampling=SamplingSpec(
-                    n=cfg.num_rollouts,
-                    temperature=cfg.temperature,
-                    top_p=cfg.top_p,
-                    top_k=cfg.top_k,
-                    max_tokens=cfg.max_tokens,
-                ),
-                purpose="label",
-                ground_truths=None,
-                verifiers=None,
-            )
-            self._assert_policy(frozen)
-            by_id = {group.request_id: group for group in groups}
             retry: list[CandidateDraft] = []
-            for draft, request_id in zip(pending, request_ids, strict=True):
-                group = by_id.get(
-                    request_id, GeneratedGroup(request_id=request_id, samples=[])
+            by_needed: dict[int, list[CandidateDraft]] = {}
+            for draft in pending:
+                collected = sum(
+                    len(group.samples)
+                    for group in fragments[draft.candidate.candidate_id]
                 )
-                evidence = build_pseudo_label(
-                    group,
-                    requested_rollouts=cfg.num_rollouts,
-                    proposed_answer=draft.candidate.proposed_answer,
-                    verifier=draft.preliminary_verifier,
-                    grader=self.grader,
-                    identity=frozen,
+                by_needed.setdefault(cfg.num_rollouts - collected, []).append(draft)
+            for needed, bucket in sorted(by_needed.items()):
+                request_ids = [
+                    stable_id(
+                        "label_refill",
+                        frozen.run_uuid,
+                        frozen.policy_version,
+                        iteration,
+                        wave_index,
+                        draft.candidate.candidate_id,
+                        attempt,
+                        needed,
+                    )
+                    for draft in bucket
+                ]
+                groups = self.backend.generate(
+                    [
+                        self.prompts.solver_messages(draft.candidate.question)
+                        for draft in bucket
+                    ],
+                    request_ids=request_ids,
+                    sampling=SamplingSpec(
+                        n=needed,
+                        temperature=cfg.temperature,
+                        top_p=cfg.top_p,
+                        top_k=cfg.top_k,
+                        max_tokens=cfg.max_tokens,
+                    ),
+                    purpose="label",
+                    ground_truths=None,
+                    verifiers=None,
                 )
-                infrastructure = evidence.reason in {
-                    "incomplete_label_group",
-                    "label_group_contains_rejected_sample",
-                }
-                if infrastructure and attempt < cfg.max_infrastructure_retries:
+                self._assert_policy(frozen)
+                by_id = {group.request_id: group for group in groups}
+                for draft, request_id in zip(bucket, request_ids, strict=True):
+                    raw = by_id.get(
+                        request_id,
+                        GeneratedGroup(request_id=request_id, samples=[]),
+                    )
+                    good_indices = [
+                        index
+                        for index, sample in enumerate(raw.samples)
+                        if sample.status == "accepted"
+                    ][:needed]
+                    if good_indices:
+                        fragments[draft.candidate.candidate_id].append(
+                            select_generated_samples(raw, good_indices)
+                        )
+                    assembled_id = stable_id(
+                        "label_assembled",
+                        frozen.run_uuid,
+                        frozen.policy_version,
+                        iteration,
+                        wave_index,
+                        draft.candidate.candidate_id,
+                    )
+                    group = merge_generated_groups(
+                        assembled_id,
+                        fragments[draft.candidate.candidate_id],
+                    )
+                    if len(group.samples) < cfg.num_rollouts and attempt < cfg.max_infrastructure_retries:
+                        self._event(
+                            iteration=iteration,
+                            wave_index=wave_index,
+                            phase="pseudo_label",
+                            status="retrying",
+                            reason="incomplete_label_group",
+                            candidate_id=draft.candidate.candidate_id,
+                            identity=(draft.candidate.candidate_id, "refill", attempt),
+                            details={
+                                "attempt": attempt,
+                                "request_id": raw.request_id,
+                                "requested_in_attempt": needed,
+                                "collected_total": len(group.samples),
+                                "remaining": cfg.num_rollouts - len(group.samples),
+                                "rollout_group": self._group_diagnostics(
+                                    raw, requested=needed
+                                ),
+                            },
+                        )
+                        retry.append(draft)
+                        continue
+                    evidence = build_pseudo_label(
+                        group,
+                        requested_rollouts=cfg.num_rollouts,
+                        proposed_answer=draft.candidate.proposed_answer,
+                        verifier=draft.preliminary_verifier,
+                        grader=self.grader,
+                        identity=frozen,
+                    )
+                    label_observation_id = stable_id(
+                        "label_observation",
+                        frozen.run_uuid,
+                        frozen.policy_version,
+                        iteration,
+                        wave_index,
+                        draft.candidate.candidate_id,
+                    )
+                    self.store.append_label_observation(
+                        observation_id=label_observation_id,
+                        candidate_id=draft.candidate.candidate_id,
+                        iteration=iteration,
+                        evidence=evidence,
+                    )
+                    status = "accepted" if evidence.accepted else "rejected"
                     self._event(
                         iteration=iteration,
                         wave_index=wave_index,
                         phase="pseudo_label",
-                        status="retrying",
+                        status=status,
                         reason=evidence.reason,
                         candidate_id=draft.candidate.candidate_id,
-                        identity=(draft.candidate.candidate_id, "retry", attempt),
+                        identity=(draft.candidate.candidate_id,),
                         details={
+                            "label_observation_id": label_observation_id,
+                            "pseudo_gold": evidence.pseudo_gold,
+                            "cluster_sizes": evidence.cluster_sizes,
+                            "agreement": evidence.agreement,
+                            "proposed_matches": evidence.proposed_matches,
                             "attempt": attempt,
-                            "request_id": group.request_id,
+                            "refill_requests": attempt + 1,
                             "rollout_group": self._group_diagnostics(
                                 group, requested=cfg.num_rollouts
                             ),
                         },
                     )
-                    retry.append(draft)
-                    continue
-                label_observation_id = stable_id(
-                    "label_observation",
-                    frozen.run_uuid,
-                    frozen.policy_version,
-                    iteration,
-                    wave_index,
-                    draft.candidate.candidate_id,
-                )
-                self.store.append_label_observation(
-                    observation_id=label_observation_id,
-                    candidate_id=draft.candidate.candidate_id,
-                    iteration=iteration,
-                    evidence=evidence,
-                )
-                status = "accepted" if evidence.accepted else "rejected"
-                self._event(
-                    iteration=iteration,
-                    wave_index=wave_index,
-                    phase="pseudo_label",
-                    status=status,
-                    reason=evidence.reason,
-                    candidate_id=draft.candidate.candidate_id,
-                    identity=(draft.candidate.candidate_id,),
-                    details={
-                        "label_observation_id": label_observation_id,
-                        "pseudo_gold": evidence.pseudo_gold,
-                        "cluster_sizes": evidence.cluster_sizes,
-                        "agreement": evidence.agreement,
-                        "proposed_matches": evidence.proposed_matches,
-                        "attempt": attempt,
-                        "rollout_group": self._group_diagnostics(
-                            group, requested=cfg.num_rollouts
-                        ),
-                    },
-                )
-                if evidence.accepted:
-                    accepted.append((draft, evidence))
+                    if evidence.accepted:
+                        accepted.append((draft, evidence))
             pending = retry
         return accepted
 

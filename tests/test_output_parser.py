@@ -31,6 +31,26 @@ def test_parse_problem_response_accepts_box_before_domain() -> None:
     assert parsed.answer == r"\frac{1}{2}"
 
 
+def test_parse_problem_response_recovers_unambiguous_model_variants() -> None:
+    wrapped, error = parse_problem_response(
+        "<question>How many?</question>"
+        r"<number_theory>\boxed{7}</number_theory>"
+    )
+    assert error is None
+    assert wrapped is not None
+    assert wrapped.domain == "number_theory"
+    assert wrapped.answer == "7"
+
+    explained, error = parse_problem_response(
+        "<question>What is 2+2?</question>"
+        r"\boxed{4}<domain>algebra</domain>"
+        "The domain is algebra because the question is arithmetic."
+    )
+    assert error is None
+    assert explained is not None
+    assert explained.answer == "4"
+
+
 def test_parse_problem_response_fails_closed_on_public_noise_or_copies() -> None:
     cases = {
         "preamble<question>Q?</question><domain>algebra</domain>\\boxed{1}": "missing_question_open",
@@ -39,7 +59,7 @@ def test_parse_problem_response_fails_closed_on_public_noise_or_copies() -> None
         "<question>Q?</question><domain>Algebra</domain>\\boxed{1}": "invalid_domain",
         "<question>Q?</question><domain>algebra,geometry</domain>\\boxed{1}": "invalid_domain",
         "<question>Q?</question><domain>algebra</domain><domain>geometry</domain>\\boxed{1}": "multiple_domain_blocks",
-        "<question>Q?</question><domain>algebra</domain>\\boxed{1} trailing": "trailing_output",
+        "<question>Q?</question><domain>algebra</domain>\\boxed{1} trailing \\boxed{2}": "trailing_output",
         "<question>Q?</question><question>Q2?</question><domain>algebra</domain>\\boxed{1}": "multiple_question_blocks",
         "<question>Q?</question><domain>algebra</domain>1": "missing_boxed_answer",
         "<question>Q?</question><domain>algebra</domain>\\boxed{": "unclosed_boxed_answer",

@@ -83,6 +83,10 @@ class FrontierConfig:
     # first becomes selectable from its score in a later cycle.
     warmup_use_current_score: bool = False
     skip_update_when_short: bool = True
+    # Apply a ready replay batch before spending the cycle budget on new
+    # discovery.  This keeps an expensive generation wave from delaying an
+    # optimizer update that is already fully remeasured and validated.
+    update_before_discovery: bool = False
     remeasure_budget: int = 64
     max_per_cell_per_batch: int = 8
 

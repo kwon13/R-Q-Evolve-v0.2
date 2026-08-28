@@ -282,11 +282,123 @@ class EvolutionEngine:
             )
         return result.scores, candidates
 
+    def _apply_replay_update(
+        self,
+        *,
+        iteration: int,
+        frozen: PolicyIdentity,
+        lagged: list[tuple[ProblemRecord, Any]],
+        training_candidates: list[LaggedTrainingCandidate],
+        before_discovery: bool,
+    ) -> tuple[bool, str | None, str | None, str | None]:
+        """Apply a complete replay batch and return its audit projection.
+
+        Discovery is deliberately not part of this helper.  Once the batch is
+        committed, subsequent generation must observe the new resident policy;
+        callers therefore refresh their policy identity before starting a new
+        discovery wave.
+        """
+        update_applied = False
+        skip_reason: str | None = None
+        replay_batch_id: str | None = None
+        checkpoint: str | None = None
+        if not self.config.training.enabled:
+            skip_reason = "training_disabled"
+        elif len(lagged) != self.config.frontier.training_batch_size:
+            skip_reason = "insufficient_lagged_frontier"
+        elif len(training_candidates) != self.config.frontier.training_batch_size:
+            skip_reason = "incomplete_current_remeasurement"
+        else:
+            try:
+                batch = ReplayTrainingBatch.build(
+                    buffer=self.replay,
+                    candidates=training_candidates,
+                    training_groups=self.config.frontier.training_batch_size,
+                    selection_lag=self.config.frontier.selection_lag,
+                    frontier_s_hat_low=self.config.scoring.frontier_s_hat_low,
+                    frontier_s_hat_high=self.config.scoring.frontier_s_hat_high,
+                    max_per_cell=self.config.frontier.max_per_cell_per_batch,
+                )
+            except (ReplayBatchUnavailable, ReplayContractError) as exc:
+                skip_reason = f"replay_batch_unavailable:{exc}"
+            else:
+                replay_batch_id = batch.batch_id
+                self._save_phase("batch_ready", batch_id=batch.batch_id)
+                # Past this barrier an uncertain optimizer call cannot be
+                # silently retried: doing so could apply the same update twice.
+                metrics = self.training_backend.apply_replay_batch(batch)
+                after = self.policy_backend.policy_identity
+                if after == frozen:
+                    refresh = getattr(
+                        self.training_backend, "refresh_policy_identity", None
+                    )
+                    if callable(refresh):
+                        refresh()
+                        after = self.policy_backend.policy_identity
+                if after == frozen:
+                    raise RuntimeError(
+                        "optimizer returned but policy identity did not advance"
+                    )
+                update_applied = True
+                self.state.policy_version = after.policy_version
+                self.state.global_step = after.global_step
+                self._save_phase("update_applied", batch_id=batch.batch_id)
+                self.store.append_training_event(
+                    {
+                        "event_id": stable_id("training", iteration, batch.batch_id),
+                        "iteration": iteration,
+                        "status": "applied",
+                        "batch": batch.audit_dict(),
+                        "metrics": metrics,
+                        "before_discovery": before_discovery,
+                    }
+                )
+                checkpoint = self.training_backend.save_checkpoint(
+                    global_step=after.global_step,
+                    pipeline_state=self.state.to_dict(),
+                )
+                self.state.checkpoint_step = after.global_step
+                position, digest = self.store.event_position()
+                self.state.checkpoint_event_offset = position
+                self.state.checkpoint_event_hash = digest
+                self.store.append_training_event(
+                    {
+                        "event_id": stable_id(
+                            "training-checkpoint", iteration, batch.batch_id
+                        ),
+                        "iteration": iteration,
+                        "status": "checkpointed",
+                        "batch_id": batch.batch_id,
+                        "global_step": after.global_step,
+                        "checkpoint": checkpoint,
+                        "before_discovery": before_discovery,
+                    }
+                )
+                # A crash during discovery is recoverable as a committed
+                # checkpoint followed by an aborted cycle.
+                self.state.active_training_batch_id = None
+                self._save_phase("discovery")
+
+        if not update_applied:
+            self.store.append_training_event(
+                {
+                    "event_id": stable_id("training-skip", iteration, skip_reason),
+                    "iteration": iteration,
+                    "status": "skipped",
+                    "reason": skip_reason,
+                    "lagged_frontier_count": len(lagged),
+                    "resident_replay_groups": len(self.replay.groups),
+                    "before_discovery": before_discovery,
+                }
+            )
+        return update_applied, skip_reason, replay_batch_id, checkpoint
+
     def run_cycle(self) -> CycleSummary:
         if self.state.phase != "ready":
             raise RuntimeError(f"cannot start cycle from phase {self.state.phase!r}")
         iteration = self.state.iteration
         frozen = self.policy_backend.policy_identity
+        policy_before = frozen
         cycle_id = stable_id(
             "cycle",
             frozen.run_uuid,
@@ -312,6 +424,28 @@ class EvolutionEngine:
         _, training_candidates = self._score_initial_archive_and_lagged(
             iteration=iteration, frozen=frozen, lagged=lagged
         )
+
+        update_applied = False
+        skip_reason: str | None = None
+        replay_batch_id: str | None = None
+        checkpoint: str | None = None
+        if self.config.frontier.update_before_discovery:
+            (
+                update_applied,
+                skip_reason,
+                replay_batch_id,
+                checkpoint,
+            ) = self._apply_replay_update(
+                iteration=iteration,
+                frozen=frozen,
+                lagged=lagged,
+                training_candidates=training_candidates,
+                before_discovery=True,
+            )
+            # Discovery after an update belongs to the new policy version.
+            # If no update was possible, the original frozen identity remains
+            # the correct namespace for the generation wave.
+            frozen = self.policy_backend.policy_identity
 
         self._save_phase("discovery")
         attempted = 0
@@ -373,92 +507,18 @@ class EvolutionEngine:
                 break
             wave_index += 1
 
-        update_applied = False
-        skip_reason: str | None = None
-        replay_batch_id: str | None = None
-        checkpoint: str | None = None
-        if not self.config.training.enabled:
-            skip_reason = "training_disabled"
-        elif len(lagged) != self.config.frontier.training_batch_size:
-            skip_reason = "insufficient_lagged_frontier"
-        elif len(training_candidates) != self.config.frontier.training_batch_size:
-            skip_reason = "incomplete_current_remeasurement"
-        else:
-            try:
-                batch = ReplayTrainingBatch.build(
-                    buffer=self.replay,
-                    candidates=training_candidates,
-                    training_groups=self.config.frontier.training_batch_size,
-                    selection_lag=self.config.frontier.selection_lag,
-                    frontier_s_hat_low=self.config.scoring.frontier_s_hat_low,
-                    frontier_s_hat_high=self.config.scoring.frontier_s_hat_high,
-                    max_per_cell=self.config.frontier.max_per_cell_per_batch,
-                )
-            except (ReplayBatchUnavailable, ReplayContractError) as exc:
-                skip_reason = f"replay_batch_unavailable:{exc}"
-            else:
-                replay_batch_id = batch.batch_id
-                self._save_phase("batch_ready", batch_id=batch.batch_id)
-                # Failures beyond this boundary propagate. Treating an
-                # uncertain optimizer call as a benign skip could double-apply
-                # it on resume.
-                metrics = self.training_backend.apply_replay_batch(batch)
-                after = self.policy_backend.policy_identity
-                if after == frozen:
-                    refresh = getattr(
-                        self.training_backend, "refresh_policy_identity", None
-                    )
-                    if callable(refresh):
-                        refresh()
-                        after = self.policy_backend.policy_identity
-                if after == frozen:
-                    raise RuntimeError(
-                        "optimizer returned but policy identity did not advance"
-                    )
-                update_applied = True
-                self.state.policy_version = after.policy_version
-                self.state.global_step = after.global_step
-                self._save_phase("update_applied", batch_id=batch.batch_id)
-                event = {
-                    "event_id": stable_id("training", iteration, batch.batch_id),
-                    "iteration": iteration,
-                    "status": "applied",
-                    "batch": batch.audit_dict(),
-                    "metrics": metrics,
-                }
-                self.store.append_training_event(event)
-                checkpoint = self.training_backend.save_checkpoint(
-                    global_step=after.global_step,
-                    pipeline_state=self.state.to_dict(),
-                )
-                self.state.checkpoint_step = after.global_step
-                position, digest = self.store.event_position()
-                self.state.checkpoint_event_offset = position
-                self.state.checkpoint_event_hash = digest
-                self.store.append_training_event(
-                    {
-                        "event_id": stable_id(
-                            "training-checkpoint", iteration, batch.batch_id
-                        ),
-                        "iteration": iteration,
-                        "status": "checkpointed",
-                        "batch_id": batch.batch_id,
-                        "global_step": after.global_step,
-                        "checkpoint": checkpoint,
-                    }
-                )
-                self._save_phase("checkpointed", batch_id=batch.batch_id)
-
-        if not update_applied:
-            self.store.append_training_event(
-                {
-                    "event_id": stable_id("training-skip", iteration, skip_reason),
-                    "iteration": iteration,
-                    "status": "skipped",
-                    "reason": skip_reason,
-                    "lagged_frontier_count": len(lagged),
-                    "resident_replay_groups": len(self.replay.groups),
-                }
+        if not self.config.frontier.update_before_discovery:
+            (
+                update_applied,
+                skip_reason,
+                replay_batch_id,
+                checkpoint,
+            ) = self._apply_replay_update(
+                iteration=iteration,
+                frozen=frozen,
+                lagged=lagged,
+                training_candidates=training_candidates,
+                before_discovery=False,
             )
         current_count = current_frontier_count(
             self.archive,
@@ -469,7 +529,7 @@ class EvolutionEngine:
         after_identity = self.policy_backend.policy_identity
         summary = CycleSummary(
             iteration=iteration,
-            policy_version_before=frozen.policy_version,
+            policy_version_before=policy_before.policy_version,
             policy_version_after=after_identity.policy_version,
             accepted_before=accepted_before,
             accepted_after=len(self.archive.records),

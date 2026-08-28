@@ -9,6 +9,10 @@ from .concepts import DOMAINS
 from .utils import canonical_text, stable_id
 
 _THINK_RE = re.compile(r"\A\s*<think>.*?</think>\s*", re.DOTALL)
+_DOMAIN_WRAPPER_RE = re.compile(
+    r"\A<([a-z_]+)>\s*(\\boxed\{.*)\s*</\1>\s*\Z", re.DOTALL
+)
+_PUBLIC_MARKER_RE = re.compile(r"<\/?(?:question|domain)>|\\boxed\{")
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +83,12 @@ def parse_problem_response(response: str) -> tuple[ParsedProblem | None, str | N
         return None, "multiple_question_blocks"
     question = text[len(open_tag) : close].strip()
     tail = text[close + len(close_tag) :].strip()
+    # A frequent small-model variant uses the selected closed-vocabulary token
+    # itself as an XML tag. This is unambiguous only when the wrapper spans the
+    # entire remaining envelope and names exactly one supported domain.
+    wrapper = _DOMAIN_WRAPPER_RE.fullmatch(tail)
+    if wrapper and wrapper.group(1) in DOMAINS:
+        tail = f"<domain>{wrapper.group(1)}</domain>{wrapper.group(2)}"
     if tail.count("<domain>") > 1 or tail.count("</domain>") > 1:
         return None, "multiple_domain_blocks"
     if tail.startswith("<domain>"):
@@ -91,7 +101,8 @@ def parse_problem_response(response: str) -> tuple[ParsedProblem | None, str | N
         if parsed_box is None:
             return None, "unclosed_boxed_answer"
         answer, end = parsed_box
-        if tail[end:].strip():
+        remainder = tail[end:].strip()
+        if remainder and _PUBLIC_MARKER_RE.search(remainder):
             return None, "trailing_output"
     elif tail.startswith(r"\boxed{"):
         parsed_box = _extract_balanced_box(tail, 0)
@@ -101,7 +112,7 @@ def parse_problem_response(response: str) -> tuple[ParsedProblem | None, str | N
         domain, remainder, error = _parse_domain_prefix(tail[end:].strip())
         if error is not None:
             return None, error
-        if remainder:
+        if remainder and _PUBLIC_MARKER_RE.search(remainder):
             return None, "trailing_output"
     else:
         return None, "missing_domain_open"

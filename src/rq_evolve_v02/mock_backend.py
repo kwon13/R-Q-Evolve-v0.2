@@ -50,6 +50,35 @@ class MockPayload:
     def __len__(self) -> int:
         return len(self.rows)
 
+    def slice(self, start: int, stop: int) -> "MockPayload":
+        return MockPayload(
+            request_id=self.request_id,
+            purpose=self.purpose,
+            policy_identity=self.policy_identity,
+            prompt_fingerprint=self.prompt_fingerprint,
+            rows=self.rows[start:stop],
+        )
+
+    @classmethod
+    def concat(cls, payloads: Sequence["MockPayload"]) -> "MockPayload":
+        if not payloads:
+            raise ValueError("cannot concatenate an empty payload list")
+        first = payloads[0]
+        if any(
+            payload.purpose != first.purpose
+            or payload.policy_identity != first.policy_identity
+            or payload.prompt_fingerprint != first.prompt_fingerprint
+            for payload in payloads
+        ):
+            raise ValueError("mock payload fragments have incompatible contracts")
+        return cls(
+            request_id=first.request_id,
+            purpose=first.purpose,
+            policy_identity=first.policy_identity,
+            prompt_fingerprint=first.prompt_fingerprint,
+            rows=tuple(row for payload in payloads for row in payload.rows),
+        )
+
 
 def _digest_int(*parts: object) -> int:
     data = stable_json(parts).encode("utf-8")

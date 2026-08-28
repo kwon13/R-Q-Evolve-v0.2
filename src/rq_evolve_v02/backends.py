@@ -34,6 +34,74 @@ class GeneratedGroup:
     prompt_fingerprint: str = ""
 
 
+def select_generated_samples(
+    group: GeneratedGroup,
+    indices: Sequence[int],
+    *,
+    request_id: str | None = None,
+) -> GeneratedGroup:
+    """Select matching decoded and native payload rows from one generation.
+
+    Score rows are later replayed by VERL, so retry code must never concatenate
+    decoded text while silently retaining a different native payload.
+    """
+
+    chosen = [int(index) for index in indices]
+    if any(index < 0 or index >= len(group.samples) for index in chosen):
+        raise IndexError("generated sample index is out of range")
+    payload = group.payload
+    selected_payload = None
+    if payload is not None:
+        if not hasattr(payload, "slice"):
+            raise TypeError(
+                f"{type(payload).__name__} cannot slice native generation rows"
+            )
+        pieces = [payload.slice(index, index + 1) for index in chosen]
+        if pieces:
+            concat = getattr(type(payload), "concat", None)
+            if concat is None:
+                raise TypeError(
+                    f"{type(payload).__name__} cannot concatenate native rows"
+                )
+            selected_payload = concat(pieces)
+    return GeneratedGroup(
+        request_id=str(request_id or group.request_id),
+        samples=[group.samples[index] for index in chosen],
+        payload=selected_payload,
+        prompt_fingerprint=group.prompt_fingerprint,
+    )
+
+
+def merge_generated_groups(
+    request_id: str,
+    groups: Sequence[GeneratedGroup],
+) -> GeneratedGroup:
+    """Merge refill fragments while preserving one-to-one native row order."""
+
+    fragments = [group for group in groups if group.samples]
+    samples = [sample for group in fragments for sample in group.samples]
+    payloads = [group.payload for group in fragments if group.payload is not None]
+    if payloads and len(payloads) != len(fragments):
+        raise TypeError("cannot merge a mixture of native and text-only fragments")
+    payload = None
+    if payloads:
+        concat = getattr(type(payloads[0]), "concat", None)
+        if concat is None or any(type(row) is not type(payloads[0]) for row in payloads):
+            raise TypeError("native generation fragments cannot be concatenated")
+        payload = concat(payloads)
+    fingerprints = {
+        group.prompt_fingerprint for group in fragments if group.prompt_fingerprint
+    }
+    if len(fingerprints) > 1:
+        raise ValueError("cannot merge generation fragments from different prompts")
+    return GeneratedGroup(
+        request_id=str(request_id),
+        samples=samples,
+        payload=payload,
+        prompt_fingerprint=next(iter(fingerprints), ""),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class PolicyIdentity:
     run_uuid: str
