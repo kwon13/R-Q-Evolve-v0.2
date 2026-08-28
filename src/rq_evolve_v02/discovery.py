@@ -594,7 +594,6 @@ class DiscoveryRunner:
                     proposed_answer=draft.candidate.proposed_answer,
                     verifier=draft.preliminary_verifier,
                     grader=self.grader,
-                    min_agreement=cfg.min_agreement,
                     identity=frozen,
                 )
                 infrastructure = evidence.reason in {

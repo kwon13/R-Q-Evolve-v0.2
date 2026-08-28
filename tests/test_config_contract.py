@@ -37,10 +37,6 @@ def test_label_score_and_training_geometry_is_fixed() -> None:
         "exactly 9 label rollouts",
     )
     assert_invalid(
-        lambda config: setattr(config.labeling, "min_agreement", 6 / 9),
-        "min_agreement=5/9",
-    )
-    assert_invalid(
         lambda config: setattr(config.labeling, "count_invalid_in_denominator", False),
         "denominator",
     )
@@ -48,6 +44,9 @@ def test_label_score_and_training_geometry_is_fixed() -> None:
         lambda config: setattr(config.scoring, "num_rollouts", 16),
         "exactly 8 score rollouts",
     )
+    config = AppConfig()
+    assert config.scoring.frontier_s_hat_low == 0.3
+    assert config.scoring.frontier_s_hat_high == 0.8
     assert_invalid(
         lambda config: setattr(config.frontier, "training_batch_size", 16),
         "exactly 32 training",

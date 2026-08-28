@@ -11,10 +11,10 @@ Each cycle has two distinct data paths:
 1. Select 32 parent pairs from the accepted MAP and request two children per pair, giving 64 initial candidates. If too few survive, refill in blocks of 32 up to 128 candidates.
 2. Strictly parse each candidate into one question and one proposed boxed answer.
 3. Reject malformed, unsafe, exact-duplicate, near-duplicate, or parent-copy candidates.
-4. Run exactly nine independent label rollouts. Invalid or boxless outputs remain in the fixed denominator. Accept only a unique pseudo-gold cluster with at least five votes. The crossover answer is retained as audit metadata but does not gate acceptance.
+4. Run exactly nine independent label rollouts. Select the unique largest answer-equivalence cluster as pseudo-gold; ties and unsafe equivalence relations abstain. Invalid or boxless outputs remain in the fixed denominator for audit. The crossover answer is retained as metadata but does not gate acceptance.
 5. Read exactly one closed-vocabulary top-level domain from the crossover response and assign one deterministic problem type.
 6. Append every valid and novel problem to the accepted catalog. Frontier membership controls training, not archival.
-7. Score accepted incumbents with a complete group of eight current-policy rollouts and compute \(R_Q\).
+7. Score accepted incumbents with a complete group of eight current-policy rollouts and compute \(R_Q\). Only problems with fresh success rate in `[0.3, 0.8]` enter the training frontier.
 8. Select training problems only with the previous iteration's score, then replay the newly measured current-policy payload exactly once. The fresh success rate is audit metadata, not a second eligibility gate: a complete current group remains eligible even when it is all-correct or all-wrong. A training update requires exactly 32 distinct problem groups from one policy version; there is no padding, resampling fallback, or partial update.
 
 Fresh children first become eligible on the next cycle. Therefore, a clean discovery cycle can correctly archive problems while skipping the optimizer update.

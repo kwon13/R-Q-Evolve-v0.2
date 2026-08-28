@@ -37,7 +37,6 @@ def build_pseudo_label(
     proposed_answer: str,
     verifier: dict,
     grader: GraderClient,
-    min_agreement: float,
     identity: PolicyIdentity | None = None,
 ) -> LabelEvidence:
     identity_fields = {
@@ -139,17 +138,13 @@ def build_pseudo_label(
     pseudo_gold = valid_answers[winner[0]]
     agreement = len(winner) / requested_rollouts
     proposed_matches = grader.grade(proposed_answer, pseudo_gold, verifier)
-    if agreement < min_agreement:
-        reason = "insufficient_label_agreement"
-    else:
-        reason = None
     return LabelEvidence(
         pseudo_gold=pseudo_gold,
         cluster_sizes=sizes,
         agreement=agreement,
         proposed_matches=proposed_matches,
-        accepted=reason is None,
-        reason=reason,
+        accepted=True,
+        reason=None,
         rollouts=rollouts,
         **identity_fields,
     )

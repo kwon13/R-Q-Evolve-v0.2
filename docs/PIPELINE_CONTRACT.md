@@ -48,7 +48,7 @@ For each candidate:
 2. Extract at most one final boxed answer from each response.
 3. Keep the denominator equal to nine. A completed response with a missing, invalid, or ungradeable boxed answer contributes no vote but still occupies a denominator slot. Transport timeout, worker loss, truncation at the token cap, or another infrastructure failure rejects or reruns the whole label group; it never creates a smaller denominator.
 4. Build equivalence clusters using symmetric, hard-timeout grading. A non-transitive equivalence graph, tied largest clusters, or grader failure causes abstention.
-5. Require a unique cluster of at least five answers, so `agreement >= 5/9`.
+5. Select the unique largest cluster as pseudo-gold regardless of its absolute vote count. A tied largest cluster still causes abstention.
 6. Record whether the crossover model's proposed answer grades equivalent to the pseudo-gold representative, but do not use that audit result as an admission gate.
 7. Reject proof-only, damaged, underspecified, unsafe, or unsupported-output questions.
 
@@ -77,6 +77,10 @@ Problem type is derived from the visible output request and cross-checked agains
 - `counting`, `optimization`, and `function` → a scalar/expression result.
 
 Problem type does not direct crossover. It describes the accepted child after generation.
+
+Pseudo-label plurality controls the stored target, not training eligibility.
+After an independent eight-rollout score observation, only problems satisfying
+`0.3 <= s_hat <= 0.8` enter the training frontier.
 
 ## Score observation
 

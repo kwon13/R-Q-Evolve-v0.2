@@ -37,14 +37,30 @@ def _extract_balanced_box(text: str, start: int) -> tuple[str, int] | None:
     return None
 
 
+def _parse_domain_prefix(text: str) -> tuple[str | None, str, str | None]:
+    """Parse one exact domain block at the start of ``text``."""
+
+    open_tag, close_tag = "<domain>", "</domain>"
+    if not text.startswith(open_tag):
+        return None, text, "missing_domain_open"
+    close = text.find(close_tag, len(open_tag))
+    if close < 0:
+        return None, text, "missing_domain_close"
+    domain = text[len(open_tag) : close].strip()
+    if domain not in DOMAINS:
+        return None, text, "invalid_domain"
+    return domain, text[close + len(close_tag) :].strip(), None
+
+
 def parse_problem_response(response: str) -> tuple[ParsedProblem | None, str | None]:
     """Require one question, one closed-vocabulary domain, and one answer.
 
     Qwen may emit one private ``<think>`` prefix even when instructed not to;
     that prefix is ignored.  Anything else before, between, or after the three
     public fields fails closed so fields from different copies can never be
-    spliced together.  Domain tokens are exact and case-sensitive: the
-    crossover model's declaration is accepted only when it is one of DOMAINS.
+    spliced together.  Domain tokens are exact and case-sensitive.  The domain
+    and answer fields may appear in either order because small base models
+    frequently preserve R-Zero's historical question-then-box envelope.
     """
 
     if not isinstance(response, str):
@@ -63,29 +79,33 @@ def parse_problem_response(response: str) -> tuple[ParsedProblem | None, str | N
         return None, "multiple_question_blocks"
     question = text[len(open_tag) : close].strip()
     tail = text[close + len(close_tag) :].strip()
-    domain_open, domain_close = "<domain>", "</domain>"
-    if not tail.startswith(domain_open):
-        return None, "missing_domain_open"
-    close = tail.find(domain_close, len(domain_open))
-    if close < 0:
-        return None, "missing_domain_close"
-    if (
-        tail.find(domain_open, len(domain_open)) >= 0
-        or tail.find(domain_close, close + len(domain_close)) >= 0
-    ):
+    if tail.count("<domain>") > 1 or tail.count("</domain>") > 1:
         return None, "multiple_domain_blocks"
-    domain = tail[len(domain_open) : close].strip()
-    if domain not in DOMAINS:
-        return None, "invalid_domain"
-    tail = tail[close + len(domain_close) :].strip()
-    if not tail.startswith(r"\boxed{"):
-        return None, "missing_boxed_answer"
-    parsed_box = _extract_balanced_box(tail, 0)
-    if parsed_box is None:
-        return None, "unclosed_boxed_answer"
-    answer, end = parsed_box
-    if tail[end:].strip():
-        return None, "trailing_output"
+    if tail.startswith("<domain>"):
+        domain, tail, error = _parse_domain_prefix(tail)
+        if error is not None:
+            return None, error
+        if not tail.startswith(r"\boxed{"):
+            return None, "missing_boxed_answer"
+        parsed_box = _extract_balanced_box(tail, 0)
+        if parsed_box is None:
+            return None, "unclosed_boxed_answer"
+        answer, end = parsed_box
+        if tail[end:].strip():
+            return None, "trailing_output"
+    elif tail.startswith(r"\boxed{"):
+        parsed_box = _extract_balanced_box(tail, 0)
+        if parsed_box is None:
+            return None, "unclosed_boxed_answer"
+        answer, end = parsed_box
+        domain, remainder, error = _parse_domain_prefix(tail[end:].strip())
+        if error is not None:
+            return None, error
+        if remainder:
+            return None, "trailing_output"
+    else:
+        return None, "missing_domain_open"
+    assert domain is not None
     question = canonical_text(question)
     answer = answer.strip()
     if not question:

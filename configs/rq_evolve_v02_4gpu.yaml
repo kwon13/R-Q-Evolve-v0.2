@@ -21,7 +21,6 @@ labeling:
   top_p: 1.0
   top_k: 40
   max_tokens: 4096
-  min_agreement: 0.5555555555555556
   count_invalid_in_denominator: true
   max_infrastructure_retries: 2
 
@@ -32,8 +31,8 @@ scoring:
   max_tokens: 5000
   # This band is read only from cycle t-1 for training eligibility. The fresh
   # cycle-t score supplies the replay payload and never re-gates that choice.
-  frontier_s_hat_low: 0.1
-  frontier_s_hat_high: 0.9
+  frontier_s_hat_low: 0.3
+  frontier_s_hat_high: 0.8
   reject_overlong: true
   reject_invalid_answer: false
   reject_duplicates: false

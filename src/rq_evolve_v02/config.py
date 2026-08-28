@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, fields, is_dataclass
-import math
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -30,7 +29,6 @@ class LabelingConfig:
     top_p: float = 1.0
     top_k: int = 40
     max_tokens: int = 4096
-    min_agreement: float = 5 / 9
     count_invalid_in_denominator: bool = True
     max_infrastructure_retries: int = 2
 
@@ -41,8 +39,8 @@ class ScoringConfig:
     temperature: float = 1.0
     top_p: float = 0.95
     max_tokens: int = 5000
-    frontier_s_hat_low: float = 0.1
-    frontier_s_hat_high: float = 0.9
+    frontier_s_hat_low: float = 0.3
+    frontier_s_hat_high: float = 0.8
     reject_overlong: bool = True
     reject_invalid_answer: bool = False
     reject_duplicates: bool = False
@@ -166,13 +164,6 @@ class AppConfig:
             raise ValueError("generation token limits must be positive")
         if self.labeling.num_rollouts != 9:
             raise ValueError("v0.2 requires exactly 9 label rollouts")
-        if not math.isclose(
-            self.labeling.min_agreement,
-            5 / 9,
-            rel_tol=0.0,
-            abs_tol=1e-15,
-        ):
-            raise ValueError("v0.2 requires labeling.min_agreement=5/9")
         if not self.labeling.count_invalid_in_denominator:
             raise ValueError(
                 "count_invalid_in_denominator must remain true; boxless completed "

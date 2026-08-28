@@ -7,7 +7,7 @@ R-Q-Evolve-v0.2 is a standalone implementation. The two neighboring repositories
 | Design concern | Inspected reference | v0.2 behavior |
 | --- | --- | --- |
 | Free-form challenger output | `../R-Zero/question_generate/question_generate.py` | Extends the one `<question>...</question>` plus `\boxed{...}` envelope with one strict seven-value `<domain>` field; the prompt contains two concrete parents and each of 32 pair prompts requests two samples. |
-| Independent pseudo-label rollouts | `../R-Zero/question_evaluate/evaluate.py` | Retains nine solver samples, but fixes the denominator at nine. Boxless or invalid outputs do not disappear from the confidence denominator. |
+| Independent pseudo-label rollouts | `../R-Zero/question_evaluate/evaluate.py` | Retains nine solver samples and plurality pseudo-gold. v0.2 records agreement over the fixed nine-sample denominator and abstains on tied largest clusters. |
 | Symbolic answer clustering | `../R-Zero/question_evaluate/evaluate.py` | Uses hard-timeout grading, checks equivalence symmetrically, requires a unique winning cluster, and abstains on non-transitive or ambiguous relations. |
 | Challenger answer | Generated-question JSON in R-Zero | Retains it as generation metadata. As in the inspected evaluator, Solver consensus supplies pseudo-gold and a Challenger-answer mismatch does not reject the question. |
 

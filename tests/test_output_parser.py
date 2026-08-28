@@ -19,6 +19,18 @@ def test_parse_problem_response_accepts_think_prefix_and_nested_box() -> None:
     assert parsed.answer == r"\frac{1}{2}"
 
 
+def test_parse_problem_response_accepts_box_before_domain() -> None:
+    parsed, error = parse_problem_response(
+        "<question>Find the value.</question>"
+        r"\boxed{\frac{1}{2}}"
+        "<domain>algebra</domain>"
+    )
+    assert error is None
+    assert parsed is not None
+    assert parsed.domain == "algebra"
+    assert parsed.answer == r"\frac{1}{2}"
+
+
 def test_parse_problem_response_fails_closed_on_public_noise_or_copies() -> None:
     cases = {
         "preamble<question>Q?</question><domain>algebra</domain>\\boxed{1}": "missing_question_open",

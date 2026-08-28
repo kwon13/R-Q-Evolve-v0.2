@@ -32,7 +32,6 @@ def test_labeling_uses_fixed_requested_denominator() -> None:
         proposed_answer="2",
         verifier={"mode": "expression"},
         grader=ExactGrader(),  # type: ignore[arg-type]
-        min_agreement=5 / 9,
     )
     assert evidence.accepted
     assert evidence.cluster_sizes == [5]
@@ -47,7 +46,6 @@ def test_labeling_rejects_incomplete_and_tied_groups() -> None:
         proposed_answer="2",
         verifier={"mode": "expression"},
         grader=ExactGrader(),  # type: ignore[arg-type]
-        min_agreement=5 / 9,
     )
     assert incomplete.reason == "incomplete_label_group"
 
@@ -57,22 +55,21 @@ def test_labeling_rejects_incomplete_and_tied_groups() -> None:
         proposed_answer="2",
         verifier={"mode": "expression"},
         grader=ExactGrader(),  # type: ignore[arg-type]
-        min_agreement=4 / 9,
     )
     assert tie.reason == "label_tie"
 
-def test_proposed_answer_mismatch_is_audit_only() -> None:
+def test_unique_plurality_is_accepted_and_proposed_mismatch_is_audit_only() -> None:
     mismatch = build_pseudo_label(
-        group(*([r"\boxed{2}"] * 9)),
+        group(*([r"\boxed{2}"] * 2), r"\boxed{3}", *(["boxless"] * 6)),
         requested_rollouts=9,
         proposed_answer="3",
         verifier={"mode": "expression"},
         grader=ExactGrader(),  # type: ignore[arg-type]
-        min_agreement=5 / 9,
     )
     assert mismatch.accepted
     assert mismatch.reason is None
     assert mismatch.pseudo_gold == "2"
+    assert mismatch.agreement == 2 / 9
     assert not mismatch.proposed_matches
 
 
@@ -83,6 +80,5 @@ def test_labeling_rejects_non_transitive_equivalence() -> None:
         proposed_answer="a",
         verifier={"mode": "expression"},
         grader=NonTransitiveGrader(),  # type: ignore[arg-type]
-        min_agreement=2 / 3,
     )
     assert evidence.reason == "non_transitive_answer_equivalence"
