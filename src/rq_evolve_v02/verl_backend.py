@@ -885,6 +885,109 @@ class VerlRuntime:
         self.training_backend.close()
 
 
+@dataclass(frozen=True, slots=True)
+class _RayPPOComponents:
+    """VERL/Ray symbols resolved on the driver before Ray starts threads."""
+
+    ray: Any
+    trainer_cls: Any
+    role: Any
+    resource_pool_manager_cls: Any
+    worker_group_cls: Any
+    collate_fn: Any
+    actor_cls: Any
+    critic_cls: Any | None
+    reward_cls: Any | None
+
+
+def _configure_driver_environment(project: Path) -> dict[str, str]:
+    """Set the native-runtime environment before importing Ray/VERL/vLLM.
+
+    The same mapping is passed to Ray's worker runtime.  Setting it on the
+    driver first is important: importing VERL's FSDP worker module transitively
+    imports vLLM and native CUDA libraries, so applying these variables only in
+    ``ray.init(runtime_env=...)`` is too late for the driver process.
+    """
+
+    project_src = str(project / "src")
+    inherited_pythonpath = os.environ.get("PYTHONPATH", "")
+    pythonpath_parts = [
+        part for part in inherited_pythonpath.split(os.pathsep) if part
+    ]
+    if project_src in pythonpath_parts:
+        pythonpath_parts.remove(project_src)
+    pythonpath = os.pathsep.join([project_src, *pythonpath_parts])
+    env_vars = {
+        "TOKENIZERS_PARALLELISM": "true",
+        "NCCL_DEBUG": "WARN",
+        "VLLM_USE_V1": "1",
+        "VLLM_LOGGING_LEVEL": "WARN",
+        "PYTHONPATH": pythonpath,
+    }
+    os.environ.update(env_vars)
+    return env_vars
+
+
+def _resolve_ray_ppo_components(config: Any) -> _RayPPOComponents:
+    """Import everything the trainer builder needs before ``ray.init``."""
+
+    strategy = str(config.actor_rollout_ref.actor.get("strategy", "fsdp"))
+    if strategy not in {"fsdp", "fsdp2"}:
+        raise NotImplementedError(
+            f"v0.2 runtime currently supports fsdp/fsdp2, got {strategy!r}"
+        )
+
+    _startup_log("importing Ray driver module")
+    ray = importlib.import_module("ray")
+    _startup_log("Ray driver module ready; importing VERL trainer API")
+    trainer_cls = _import_attr(
+        [
+            ("verl.trainer.ppo.ray_trainer", "RayPPOTrainer"),
+            ("verl.trainer.ray_trainer", "RayPPOTrainer"),
+        ]
+    )
+    role = _import_attr(
+        [
+            ("verl.trainer.ppo.ray_trainer", "Role"),
+            ("verl.trainer.ppo.utils", "Role"),
+            ("verl.trainer.ray_trainer", "Role"),
+        ]
+    )
+    resource_pool_manager_cls = _import_attr(
+        [
+            ("verl.trainer.ppo.ray_trainer", "ResourcePoolManager"),
+            ("verl.single_controller.ray", "ResourcePoolManager"),
+            ("verl.trainer.ray_trainer", "ResourcePoolManager"),
+        ]
+    )
+    worker_group_cls = _import_attr(
+        [("verl.single_controller.ray", "RayWorkerGroup")]
+    )
+    collate_fn = _import_attr(
+        [
+            ("verl.utils.dataset.rl_dataset", "collate_fn"),
+            ("verl.utils.dataset", "collate_fn"),
+        ]
+    )
+    _startup_log("VERL trainer API ready; importing FSDP worker module")
+    workers = importlib.import_module("verl.workers.fsdp_workers")
+    actor_cls = getattr(workers, "ActorRolloutRefWorker")
+    actor_cls = getattr(workers, "AsyncActorRolloutRefWorker", actor_cls)
+    components = _RayPPOComponents(
+        ray=ray,
+        trainer_cls=trainer_cls,
+        role=role,
+        resource_pool_manager_cls=resource_pool_manager_cls,
+        worker_group_cls=worker_group_cls,
+        collate_fn=collate_fn,
+        actor_cls=actor_cls,
+        critic_cls=getattr(workers, "CriticWorker", None),
+        reward_cls=getattr(workers, "RewardModelWorker", None),
+    )
+    _startup_log("VERL FSDP worker module ready")
+    return components
+
+
 def build_verl_runtime(
     app_config: Any,
     *,
@@ -900,9 +1003,11 @@ def build_verl_runtime(
     and blocks on :class:`ResidentReplayDataset` between engine submissions.
     """
 
+    project = Path(project_root).expanduser().resolve()
+    driver_env = _configure_driver_environment(project)
+    _startup_log("driver environment configured before Ray/VERL imports")
     if importlib.util.find_spec("verl") is None:
         raise RuntimeError("verl is not installed in this Python environment")
-    project = Path(project_root).expanduser().resolve()
     verl_config = _load_and_patch_verl_config(
         app_config,
         project_root=project,
@@ -920,7 +1025,10 @@ def build_verl_runtime(
     if int(verl_config.actor_rollout_ref.rollout.n) != group_size:
         raise ValueError("VERL rollout.n differs from score/replay group size")
 
-    ray = importlib.import_module("ray")
+    _startup_log("resolving RayPPOTrainer dependencies before Ray initialization")
+    components = _resolve_ray_ppo_components(verl_config)
+    _startup_log("RayPPOTrainer dependencies resolved")
+    ray = components.ray
     if not ray.is_initialized():
         ray_cfg = verl_config.get("ray_init", {}) or {}
         ray_tmp = Path(
@@ -938,17 +1046,7 @@ def build_verl_runtime(
             f"object_store_memory={object_store_memory}, temp={ray_tmp})"
         )
         ray.init(
-            runtime_env={
-                "env_vars": {
-                    "TOKENIZERS_PARALLELISM": "true",
-                    "NCCL_DEBUG": "WARN",
-                    "VLLM_USE_V1": "1",
-                    "VLLM_LOGGING_LEVEL": "WARN",
-                    "PYTHONPATH": str(project / "src")
-                    + os.pathsep
-                    + os.environ.get("PYTHONPATH", ""),
-                }
-            },
+            runtime_env={"env_vars": driver_env},
             num_cpus=ray_num_cpus,
             object_store_memory=object_store_memory,
             _temp_dir=str(ray_tmp),
@@ -967,6 +1065,7 @@ def build_verl_runtime(
     _startup_log("constructing RayPPOTrainer")
     trainer = _build_ray_ppo_trainer(
         verl_config,
+        components=components,
         tokenizer=tokenizer,
         processor=processor,
         train_dataset=train_dataset,
@@ -1132,51 +1231,27 @@ def _build_tokenizer_and_processor(config: Any) -> tuple[Any, Any]:
 def _build_ray_ppo_trainer(
     config: Any,
     *,
+    components: _RayPPOComponents,
     tokenizer: Any,
     processor: Any,
     train_dataset: Any,
     val_dataset: Any,
     train_sampler: Any,
 ) -> Any:
-    import ray
-
-    RayPPOTrainer = _import_attr(
-        [
-            ("verl.trainer.ppo.ray_trainer", "RayPPOTrainer"),
-            ("verl.trainer.ray_trainer", "RayPPOTrainer"),
-        ]
-    )
-    Role = _import_attr(
-        [
-            ("verl.trainer.ppo.ray_trainer", "Role"),
-            ("verl.trainer.ppo.utils", "Role"),
-            ("verl.trainer.ray_trainer", "Role"),
-        ]
-    )
-    ResourcePoolManager = _import_attr(
-        [
-            ("verl.trainer.ppo.ray_trainer", "ResourcePoolManager"),
-            ("verl.single_controller.ray", "ResourcePoolManager"),
-            ("verl.trainer.ray_trainer", "ResourcePoolManager"),
-        ]
-    )
-    RayWorkerGroup = _import_attr([("verl.single_controller.ray", "RayWorkerGroup")])
-    collate_fn = _import_attr(
-        [
-            ("verl.utils.dataset.rl_dataset", "collate_fn"),
-            ("verl.utils.dataset", "collate_fn"),
-        ]
-    )
+    ray = components.ray
+    RayPPOTrainer = components.trainer_cls
+    Role = components.role
+    ResourcePoolManager = components.resource_pool_manager_cls
+    RayWorkerGroup = components.worker_group_cls
+    collate_fn = components.collate_fn
     strategy = str(config.actor_rollout_ref.actor.get("strategy", "fsdp"))
     if strategy not in {"fsdp", "fsdp2"}:
         raise NotImplementedError(
             f"v0.2 runtime currently supports fsdp/fsdp2, got {strategy!r}"
         )
-    workers = importlib.import_module("verl.workers.fsdp_workers")
-    actor_cls = getattr(workers, "ActorRolloutRefWorker")
-    actor_cls = getattr(workers, "AsyncActorRolloutRefWorker", actor_cls)
-    critic_cls = getattr(workers, "CriticWorker", None)
-    reward_cls = getattr(workers, "RewardModelWorker", None)
+    actor_cls = components.actor_cls
+    critic_cls = components.critic_cls
+    reward_cls = components.reward_cls
     actor_role = getattr(Role, "ActorRollout", getattr(Role, "ActorRolloutRef", None))
     if actor_role is None:
         raise RuntimeError("installed VERL exposes no actor-rollout Role")
