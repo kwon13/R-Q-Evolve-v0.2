@@ -87,7 +87,6 @@ class VerlPolicyBackend:
         max_prompt_length: int | None = None,
         truncation: str = "error",
         request_chunk_size: int = 8,
-        domain_request_chunk_size: int = 56,
     ) -> None:
         self.trainer = trainer
         self.tokenizer = tokenizer or getattr(trainer, "tokenizer", None)
@@ -95,7 +94,6 @@ class VerlPolicyBackend:
             raise ValueError("VERL trainer/tokenizer is required")
         self._policy_identity = policy_identity
         self.request_chunk_size = max(1, int(request_chunk_size))
-        self.domain_request_chunk_size = max(1, int(domain_request_chunk_size))
         self._resident_sync_policy: tuple[str, int, int, int] | None = None
         config = getattr(trainer, "config", None)
         data_cfg = getattr(config, "data", None)
@@ -326,89 +324,6 @@ class VerlPolicyBackend:
                     prompt_fingerprint=prompt_hash(messages[index]),
                 )
             )
-        return result
-
-    def binary_token_probabilities(
-        self,
-        messages: Sequence[list[dict[str, str]]],
-        *,
-        request_ids: Sequence[str],
-        purpose: str,
-    ) -> list[dict[str, float]]:
-        """Restricted YES/NO first-token probabilities for domain arms."""
-
-        if len(messages) != len(request_ids):
-            raise ValueError("messages and request_ids must have equal length")
-        if len(messages) > self.domain_request_chunk_size:
-            collected: list[dict[str, float]] = []
-            for start in range(0, len(messages), self.domain_request_chunk_size):
-                end = start + self.domain_request_chunk_size
-                collected.extend(
-                    self.binary_token_probabilities(
-                        messages[start:end],
-                        request_ids=request_ids[start:end],
-                        purpose=purpose,
-                    )
-                )
-            return collected
-        if self._logprobs_mode != "processed_logprobs":
-            raise ReplayContractError(
-                "binary token probabilities require processed_logprobs; raw "
-                "logprobs are not normalized after the allowed-token mask"
-            )
-        yes_ids = self.tokenizer.encode("YES", add_special_tokens=False)
-        no_ids = self.tokenizer.encode("NO", add_special_tokens=False)
-        if len(yes_ids) != 1 or len(no_ids) != 1 or yes_ids[0] == no_ids[0]:
-            raise ReplayContractError(
-                "the active tokenizer must encode YES and NO as distinct single tokens"
-            )
-        prompt_batch = self._make_prompt_batch(
-            messages, ground_truths=None, verifiers=None, purpose=purpose
-        )
-        gen_batch = prompt_batch.pop(
-            batch_keys=["input_ids", "attention_mask", "position_ids"],
-            non_tensor_batch_keys=[
-                "raw_prompt_ids",
-                "raw_prompt",
-                "data_source",
-                "reward_model",
-                "extra_info",
-            ],
-        )
-        gen_batch.meta_info.update(
-            {
-                "temperature": 0.0,
-                "max_tokens": 1,
-                "logprobs": 1,
-                "allowed_token_ids": [int(yes_ids[0]), int(no_ids[0])],
-            }
-        )
-        pad_to_divisor, unpad = _require_padding_helpers()
-        manager = self._manager()
-        workers = getattr(manager, "agent_loop_workers", None)
-        divisor = max(1, len(workers) if workers is not None else 1)
-        self._wake_and_sync()
-        try:
-            padded, pad_size = pad_to_divisor(gen_batch, divisor)
-            output = unpad(manager.generate_sequences(padded), pad_size=pad_size)
-        finally:
-            self._sleep()
-        responses = output.batch.get("responses")
-        logps = output.batch.get("rollout_log_probs")
-        if responses is None or logps is None or len(responses) != len(messages):
-            raise ReplayContractError(
-                "VERL did not return restricted first-token log probabilities"
-            )
-        result: list[dict[str, float]] = []
-        for tokens, row_logps in zip(responses, logps):
-            chosen = int(tokens[0])
-            probability = min(1.0, max(0.0, math.exp(float(row_logps[0]))))
-            if chosen == int(yes_ids[0]):
-                result.append({"YES": probability, "NO": 1.0 - probability})
-            elif chosen == int(no_ids[0]):
-                result.append({"YES": 1.0 - probability, "NO": probability})
-            else:
-                raise ReplayContractError("restricted generation emitted another token")
         return result
 
     def _make_prompt_batch(
@@ -1099,7 +1014,6 @@ def build_verl_runtime(
         tokenizer=tokenizer,
         max_prompt_length=int(verl_config.data.max_prompt_length),
         request_chunk_size=int(app_config.backend.request_chunk_size),
-        domain_request_chunk_size=int(app_config.backend.domain_request_chunk_size),
     )
     training_backend = ResidentVerlTrainingBackend(
         trainer,

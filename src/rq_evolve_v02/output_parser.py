@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 
+from .concepts import DOMAINS
 from .utils import canonical_text, stable_id
 
 _THINK_RE = re.compile(r"\A\s*<think>.*?</think>\s*", re.DOTALL)
@@ -13,6 +14,7 @@ _THINK_RE = re.compile(r"\A\s*<think>.*?</think>\s*", re.DOTALL)
 @dataclass(frozen=True, slots=True)
 class ParsedProblem:
     question: str
+    domain: str
     answer: str
 
 
@@ -36,12 +38,13 @@ def _extract_balanced_box(text: str, start: int) -> tuple[str, int] | None:
 
 
 def parse_problem_response(response: str) -> tuple[ParsedProblem | None, str | None]:
-    """Require exactly one question block and one final balanced box.
+    """Require one question, one closed-vocabulary domain, and one answer.
 
     Qwen may emit one private ``<think>`` prefix even when instructed not to;
-    that prefix is ignored.  Anything else before, between, or after the two
-    public fields fails closed so a question and answer from different copies
-    can never be spliced together.
+    that prefix is ignored.  Anything else before, between, or after the three
+    public fields fails closed so fields from different copies can never be
+    spliced together.  Domain tokens are exact and case-sensitive: the
+    crossover model's declaration is accepted only when it is one of DOMAINS.
     """
 
     if not isinstance(response, str):
@@ -60,6 +63,21 @@ def parse_problem_response(response: str) -> tuple[ParsedProblem | None, str | N
         return None, "multiple_question_blocks"
     question = text[len(open_tag) : close].strip()
     tail = text[close + len(close_tag) :].strip()
+    domain_open, domain_close = "<domain>", "</domain>"
+    if not tail.startswith(domain_open):
+        return None, "missing_domain_open"
+    close = tail.find(domain_close, len(domain_open))
+    if close < 0:
+        return None, "missing_domain_close"
+    if (
+        tail.find(domain_open, len(domain_open)) >= 0
+        or tail.find(domain_close, close + len(domain_close)) >= 0
+    ):
+        return None, "multiple_domain_blocks"
+    domain = tail[len(domain_open) : close].strip()
+    if domain not in DOMAINS:
+        return None, "invalid_domain"
+    tail = tail[close + len(domain_close) :].strip()
     if not tail.startswith(r"\boxed{"):
         return None, "missing_boxed_answer"
     parsed_box = _extract_balanced_box(tail, 0)
@@ -74,7 +92,7 @@ def parse_problem_response(response: str) -> tuple[ParsedProblem | None, str | N
         return None, "empty_question"
     if not answer:
         return None, "empty_answer"
-    return ParsedProblem(question=question, answer=answer), None
+    return ParsedProblem(question=question, domain=domain, answer=answer), None
 
 
 def candidate_id(question: str, answer: str) -> str:

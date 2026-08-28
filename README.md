@@ -70,7 +70,7 @@ PYTHONPATH=src python -m rq_evolve_v02 preflight --config configs/rq_evolve_v02_
 PYTHONPATH=src python -m rq_evolve_v02 run --config configs/rq_evolve_v02_8gpu.yaml
 ```
 
-Preflight fails closed when the installed VERL version has no known patch anchor or the marker is absent. The patch is required because crossover, label, score, and one-token domain requests use different per-call sampling parameters on the same resident async rollout worker.
+Preflight fails closed when the installed VERL version has no known patch anchor or the marker is absent. The patch is required because crossover, label, and score requests use different per-call sampling parameters on the same resident async rollout worker.
 
 ## Persistent outputs
 

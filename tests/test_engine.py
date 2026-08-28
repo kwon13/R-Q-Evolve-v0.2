@@ -19,6 +19,10 @@ def test_two_cycle_discovery_then_exact_lagged_update(tmp_path: Path) -> None:
     config.archive.fsync_jsonl = False
     config.archive.store_rollout_text = False
     config.frontier.remeasure_budget = 96
+    # The mock crossover intentionally emits arithmetic/algebra children only.
+    # Lift the per-cell cap here so this replay integration test exercises the
+    # update path without fabricating semantic domain diversity.
+    config.frontier.max_per_cell_per_batch = 32
     config.run.max_iterations = 2
     config.training.total_training_steps = 1
     config.verl_config = {

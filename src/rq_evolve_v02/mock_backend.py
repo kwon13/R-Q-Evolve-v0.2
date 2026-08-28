@@ -21,7 +21,6 @@ from .backends import (
     PolicyIdentity,
     SamplingSpec,
 )
-from .concepts import DOMAINS
 from .utils import canonical_text, stable_id, stable_json
 
 
@@ -64,23 +63,6 @@ def _last_user_text(messages: Sequence[dict[str, str]]) -> str:
     return ""
 
 
-def _question_from_domain_prompt(text: str) -> str:
-    match = re.search(
-        r"FIXED PROBLEM\s*(.*?)\s*CANDIDATE DOMAIN\s*",
-        text,
-        flags=re.DOTALL,
-    )
-    return canonical_text(match.group(1)) if match else canonical_text(text)
-
-
-def _domain_from_prompt(text: str) -> str | None:
-    match = re.search(r"CANDIDATE DOMAIN\s*\n+\s*([^:\n]+)\s*:", text)
-    if not match:
-        return None
-    candidate = canonical_text(match.group(1)).lower()
-    return candidate if candidate in DOMAINS else None
-
-
 class DeterministicMockBackend:
     """Combined policy/training backend that never touches a GPU.
 
@@ -97,8 +79,6 @@ class DeterministicMockBackend:
         identity: PolicyIdentity | None = None,
         scripts: Mapping[object, Sequence[str | GeneratedSample]] | None = None,
         answers: Mapping[str, str] | None = None,
-        domain_labels: Mapping[str, str] | None = None,
-        binary_scripts: Mapping[str, Mapping[str, float]] | None = None,
     ) -> None:
         self._identity = identity or PolicyIdentity(
             run_uuid="mock-run",
@@ -112,16 +92,7 @@ class DeterministicMockBackend:
             canonical_text(question): str(answer)
             for question, answer in (answers or {}).items()
         }
-        self.domain_labels = {
-            canonical_text(question): str(domain).lower()
-            for question, domain in (domain_labels or {}).items()
-        }
-        self.binary_scripts = {
-            str(request_id): {str(key): float(value) for key, value in row.items()}
-            for request_id, row in (binary_scripts or {}).items()
-        }
         self.generation_calls: list[dict[str, Any]] = []
-        self.binary_calls: list[dict[str, Any]] = []
         self.applied_batches: list[Any] = []
         self.saved_checkpoints: list[tuple[int, dict[str, Any]]] = []
 
@@ -192,6 +163,7 @@ class DeterministicMockBackend:
                 "<question>"
                 f"For the audit token {nonce}, what is {left}+{right}?"
                 "</question>"
+                "<domain>algebra</domain>"
                 f"\\boxed{{{left + right}}}"
             )
         answer = self._default_answer(
@@ -313,36 +285,6 @@ class DeterministicMockBackend:
                 )
             )
         return groups
-
-    def binary_token_probabilities(
-        self,
-        messages: Sequence[list[dict[str, str]]],
-        *,
-        request_ids: Sequence[str],
-        purpose: str,
-    ) -> list[dict[str, float]]:
-        if len(messages) != len(request_ids):
-            raise ValueError("messages and request_ids must have equal length")
-        self.binary_calls.append(
-            {"request_ids": tuple(request_ids), "purpose": purpose}
-        )
-        result: list[dict[str, float]] = []
-        for request_messages, request_id in zip(messages, request_ids):
-            scripted = self.binary_scripts.get(request_id)
-            if scripted is not None:
-                result.append(dict(scripted))
-                continue
-            user_text = _last_user_text(request_messages)
-            question = _question_from_domain_prompt(user_text)
-            candidate = _domain_from_prompt(user_text)
-            target = self.domain_labels.get(question)
-            if target is None:
-                target = DOMAINS[_digest_int(question, "domain") % len(DOMAINS)]
-            matches = candidate == target
-            result.append(
-                {"YES": 0.97 if matches else 0.03, "NO": 0.03 if matches else 0.97}
-            )
-        return result
 
     def apply_replay_batch(self, batch: Any) -> dict[str, Any]:
         """Record the exact batch object and advance one mock policy step."""

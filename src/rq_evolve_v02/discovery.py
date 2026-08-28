@@ -9,13 +9,11 @@ from typing import Any
 from .archive import ConcreteMapArchive
 from .backends import GeneratedGroup, PolicyBackend, PolicyIdentity, SamplingSpec
 from .config import AppConfig
-from .domain import label_domains
 from .grading import GraderClient
 from .labeling import build_pseudo_label
 from .models import (
     Candidate,
     CandidateEvent,
-    DomainEvidence,
     LabelEvidence,
     ParentPair,
     ProblemRecord,
@@ -276,6 +274,7 @@ class DiscoveryRunner:
                     identity=identity,
                     details={
                         "question": question,
+                        "domain": parsed.domain,
                         "proposed_answer": parsed.answer,
                     },
                 )
@@ -390,6 +389,7 @@ class DiscoveryRunner:
                 candidate = Candidate(
                     candidate_id=attempt_id,
                     question=question,
+                    domain=parsed.domain,
                     proposed_answer=parsed.answer,
                     parent_ids=(pair.left_id, pair.right_id),
                     pair_id=pair.pair_id,
@@ -428,15 +428,13 @@ class DiscoveryRunner:
         self,
         drafts: list[CandidateDraft],
         *,
-        domains: dict[str, DomainEvidence],
         iteration: int,
         wave_index: int,
     ) -> list[CandidateDraft]:
         """Keep one deterministic representative from each near-duplicate cluster.
 
-        Domain filtering happens first so a rejected first sample cannot suppress
-        a valid sibling.  Representatives with less parent content are preferred;
-        the returned order still follows the backend's stable candidate order.
+        Representatives with less parent content are preferred; the returned
+        order still follows the backend's stable candidate order.
         """
 
         cfg = self.config.novelty
@@ -445,8 +443,6 @@ class DiscoveryRunner:
             key=lambda draft: (
                 draft.preliminary_novelty.parent_max_containment,
                 draft.preliminary_novelty.parent_max_similarity,
-                -domains[draft.candidate.candidate_id].logit_margin,
-                -domains[draft.candidate.candidate_id].top_probability,
                 draft.candidate.child_index,
                 draft.candidate.candidate_id,
             ),
@@ -689,34 +685,13 @@ class DiscoveryRunner:
                 label_accepted=0,
                 archived=[],
             )
-        domain_evidence = label_domains(
-            [draft.candidate.question for draft in drafts],
-            backend=self.backend,
-            prompts=self.prompts,
-            min_probability=self.config.domain.min_probability,
-            min_logit_margin=self.config.domain.min_logit_margin,
-            iteration=iteration,
-            request_namespace=f"wave-{wave_index}",
-        )
-        self._assert_policy(frozen)
-        domain_drafts: list[CandidateDraft] = []
-        domain_by_candidate: dict[str, DomainEvidence] = {}
-        for draft, domain in zip(drafts, domain_evidence, strict=True):
+        # The crossover response is now the domain-labeling boundary.  Its
+        # strict parser has already required exactly one token from DOMAINS, so
+        # this audit phase performs no model call and cannot reject a parsed
+        # candidate.  Keeping the event/metric name preserves log continuity.
+        domain_drafts = list(drafts)
+        for draft in domain_drafts:
             candidate = draft.candidate
-            if not domain.accepted or domain.domain is None:
-                self._event(
-                    iteration=iteration,
-                    wave_index=wave_index,
-                    phase="domain",
-                    status="rejected",
-                    reason=domain.reason or "ambiguous_domain",
-                    candidate_id=candidate.candidate_id,
-                    identity=(candidate.candidate_id,),
-                    details={"domain_evidence": domain.to_dict()},
-                )
-                continue
-            domain_drafts.append(draft)
-            domain_by_candidate[candidate.candidate_id] = domain
             self._event(
                 iteration=iteration,
                 wave_index=wave_index,
@@ -725,21 +700,17 @@ class DiscoveryRunner:
                 reason=None,
                 candidate_id=candidate.candidate_id,
                 identity=(candidate.candidate_id,),
-                details={"domain_evidence": domain.to_dict()},
-            )
-        if not domain_drafts:
-            return DiscoveryWaveResult(
-                generated=generated,
-                parsed=parsed_count,
-                preflight_accepted=len(drafts),
-                domain_accepted=0,
-                wave_novelty_accepted=0,
-                label_accepted=0,
-                archived=[],
+                details={
+                    "domain_evidence": {
+                        "accepted": True,
+                        "domain": candidate.domain,
+                        "source": "crossover_self_report",
+                        "independently_verified": False,
+                    }
+                },
             )
         label_drafts = self._filter_wave_novelty(
             domain_drafts,
-            domains=domain_by_candidate,
             iteration=iteration,
             wave_index=wave_index,
         )
@@ -762,8 +733,6 @@ class DiscoveryRunner:
         archived: list[ProblemRecord] = []
         for draft, label in labeled:
             candidate = draft.candidate
-            domain = domain_by_candidate[candidate.candidate_id]
-            assert domain.domain is not None
             assert label.pseudo_gold is not None
             final_answer_error = answer_contract_error(
                 draft.problem_type, label.pseudo_gold
@@ -860,7 +829,7 @@ class DiscoveryRunner:
                 proposed_answer=candidate.proposed_answer,
                 pseudo_gold=label.pseudo_gold,
                 verifier=verifier,
-                domain=domain.domain,
+                domain=candidate.domain,
                 problem_type=draft.problem_type,
                 parent_ids=candidate.parent_ids,
                 lineage_root_ids=roots,
@@ -886,7 +855,12 @@ class DiscoveryRunner:
                     "global_step": label.global_step,
                     "source_checkpoint": label.source_checkpoint,
                 },
-                domain_evidence=domain.to_dict(),
+                domain_evidence={
+                    "accepted": True,
+                    "domain": candidate.domain,
+                    "source": "crossover_self_report",
+                    "independently_verified": False,
+                },
                 novelty={
                     **final_novelty.to_dict(),
                     "wave": draft.wave_novelty,

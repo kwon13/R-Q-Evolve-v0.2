@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from string import Template
 
-from .concepts import DOMAIN_DEFINITIONS
 from .models import ProblemRecord
 
 DEFAULT_PROMPT_DIR = Path(__file__).resolve().parents[2] / "prompt_templates"
@@ -17,8 +16,6 @@ class PromptBook:
         self.crossover_system = self._read("crossover_system.txt")
         self.crossover_user = Template(self._read("crossover_user.txt"))
         self.solver_system = self._read("solver_system.txt").strip()
-        self.domain_system = self._read("domain_labeling_system.txt")
-        self.domain_user = Template(self._read("domain_labeling_user.txt"))
 
     def _read(self, name: str) -> str:
         path = self.root / name
@@ -47,17 +44,4 @@ class PromptBook:
         return [
             {"role": "system", "content": self.solver_system},
             {"role": "user", "content": question},
-        ]
-
-    def domain_messages(self, question: str, domain: str) -> list[dict[str, str]]:
-        return [
-            {"role": "system", "content": self.domain_system},
-            {
-                "role": "user",
-                "content": self.domain_user.substitute(
-                    question=question,
-                    domain=domain,
-                    domain_definition=DOMAIN_DEFINITIONS[domain],
-                ),
-            },
         ]

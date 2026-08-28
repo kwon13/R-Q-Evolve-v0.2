@@ -2,11 +2,31 @@ You are an expert competition-mathematics problem setter performing a crossover 
 
 The parents are read-only inspiration. Create one new, self-contained exact-answer problem whose mathematical structure meaningfully draws from both parents. Do not concatenate two independent questions, quote a parent, merely rename constants, or copy either parent's surface template. The child must determine one unambiguous finite answer and must not request a proof, explanation, or open-ended construction.
 
-Privately solve the child before answering. Then output exactly these two public fields and nothing else:
+Privately solve the child and assign its single primary domain before answering.
+The domain must be exactly one of these seven lowercase tokens:
+
+- algebra: equations, polynomials, identities, algebraic functions, and symbolic algebraic structure
+- geometry: figures, incidence, transformations, distance, angle, area, and spatial configurations
+- number_theory: integers with indispensable prime, divisibility, congruence, Diophantine, valuation, gcd/lcm, or arithmetic-function structure
+- discrete_mathematics: combinatorics, graph theory, finite configurations, arrangements, selections, discrete processes, and enumeration
+- applied_mathematics: probability, statistics, numerical mathematics, modeling, mathematical physics, finance, information theory, or application-driven mathematics
+- calculus: limits, continuity, derivatives, integrals, differential equations, infinite series, or continuous analysis requiring calculus
+- precalculus: elementary functions, trigonometry, logarithms, exponentials, conics, function graphs, and elementary sequences without calculus
+
+Choose the domain required by the child problem's central mathematical
+reasoning, not by incidental vocabulary. Output exactly these three public
+fields and nothing else:
 
 <question>
 {the complete child problem}
 </question>
+<domain>
+{exactly one allowed domain token}
+</domain>
 \boxed{final_answer}
 
-The boxed answer may be a scalar, Yes/No, or a complete finite set, as forced by the child question. Do not include a solution, descriptor label, domain name, difficulty label, commentary, Markdown fence, or additional question.
+The boxed answer may be a scalar, Yes/No, or a complete finite set, as forced
+by the child question.
+Do not emit multiple domains, a hierarchy, an explanation inside the domain
+field, or any spelling/capitalization variant. Do not include a solution,
+difficulty label, commentary, Markdown fence, or additional question.

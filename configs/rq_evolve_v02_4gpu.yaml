@@ -41,12 +41,6 @@ scoring:
   require_entropy: true
   max_infrastructure_retries: 2
 
-domain:
-  min_probability: 0.55
-  min_logit_margin: 0.50
-  temperature: 0.0
-  max_tokens: 1
-
 novelty:
   exact: true
   near_duplicate_threshold: 0.92
@@ -87,8 +81,6 @@ backend:
   n_gpus: 4
   gpu_memory_utilization: 0.42
   request_chunk_size: 8
-  # Seven binary arms per problem; one-token requests can be batched broadly.
-  domain_request_chunk_size: 56
 
 verl_config:
   data:
@@ -144,7 +136,7 @@ verl_config:
       temperature: 1.0
       top_p: 0.95
       n: 8
-      # Required for calibrated YES/NO probabilities after allowed-token masking.
+      # Keep rollout log probabilities consistent with score-entropy accounting.
       logprobs_mode: processed_logprobs
       tensor_model_parallel_size: 1
       gpu_memory_utilization: 0.42

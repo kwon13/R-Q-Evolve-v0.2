@@ -27,6 +27,7 @@ class ParentPair:
 class Candidate:
     candidate_id: str
     question: str
+    domain: str
     proposed_answer: str
     parent_ids: tuple[str, str]
     pair_id: str
@@ -44,31 +45,6 @@ class Candidate:
         payload = dict(value)
         payload["parent_ids"] = tuple(payload["parent_ids"])
         return cls(**payload)
-
-
-@dataclass(slots=True)
-class DomainEvidence:
-    probabilities: dict[str, float]
-    domain: str | None
-    top_probability: float
-    logit_margin: float
-    accepted: bool
-    reason: str | None = None
-    labeler_run_uuid: str = ""
-    labeler_policy_version: int = -1
-    labeler_adapter_version: int = -1
-    labeler_global_step: int = -1
-    source_checkpoint: str = ""
-    prompt_fingerprint: str = ""
-    min_probability: float = 0.0
-    min_logit_margin: float = 0.0
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-    @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "DomainEvidence":
-        return cls(**value)
 
 
 @dataclass(slots=True)

@@ -58,15 +58,6 @@ class PolicyBackend(Protocol):
         verifiers: Sequence[dict] | None = None,
     ) -> list[GeneratedGroup]: ...
 
-    def binary_token_probabilities(
-        self,
-        messages: Sequence[list[dict[str, str]]],
-        *,
-        request_ids: Sequence[str],
-        purpose: str,
-    ) -> list[dict[str, float]]: ...
-
-
 class TrainingBackend(Protocol):
     def apply_replay_batch(self, batch: "ReplayTrainingBatch") -> dict[str, Any]: ...
 

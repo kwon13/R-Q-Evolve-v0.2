@@ -67,8 +67,6 @@ def build_run_manifest(
             "crossover_system.txt",
             "crossover_user.txt",
             "solver_system.txt",
-            "domain_labeling_system.txt",
-            "domain_labeling_user.txt",
         )
     }
     # Force prompt parsing during preflight; the variable is intentionally used.

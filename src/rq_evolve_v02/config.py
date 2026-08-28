@@ -52,14 +52,6 @@ class ScoringConfig:
 
 
 @dataclass(slots=True)
-class DomainConfig:
-    min_probability: float = 0.55
-    min_logit_margin: float = 0.50
-    temperature: float = 0.0
-    max_tokens: int = 1
-
-
-@dataclass(slots=True)
 class NoveltyConfig:
     exact: bool = True
     near_duplicate_threshold: float = 0.92
@@ -116,7 +108,6 @@ class BackendConfig:
     n_gpus: int = 8
     gpu_memory_utilization: float = 0.42
     request_chunk_size: int = 8
-    domain_request_chunk_size: int = 56
 
 
 @dataclass(slots=True)
@@ -135,7 +126,6 @@ class AppConfig:
     generation: GenerationConfig = field(default_factory=GenerationConfig)
     labeling: LabelingConfig = field(default_factory=LabelingConfig)
     scoring: ScoringConfig = field(default_factory=ScoringConfig)
-    domain: DomainConfig = field(default_factory=DomainConfig)
     novelty: NoveltyConfig = field(default_factory=NoveltyConfig)
     archive: ArchiveConfig = field(default_factory=ArchiveConfig)
     frontier: FrontierConfig = field(default_factory=FrontierConfig)
@@ -214,14 +204,6 @@ class AppConfig:
         if not 0 <= low < high <= 1:
             raise ValueError(
                 "frontier success-rate range must satisfy 0 <= low < high <= 1"
-            )
-        if not 0.5 < self.domain.min_probability <= 1.0:
-            raise ValueError("domain.min_probability must be in (0.5, 1]")
-        if self.domain.min_logit_margin < 0:
-            raise ValueError("domain.min_logit_margin must be nonnegative")
-        if self.domain.temperature != 0.0 or self.domain.max_tokens != 1:
-            raise ValueError(
-                "domain labeling is fixed to one restricted greedy YES/NO token"
             )
         if self.frontier.training_batch_size != 32:
             raise ValueError("v0.2 requires exactly 32 training problem groups")
@@ -303,29 +285,8 @@ class AppConfig:
             raise ValueError("backend.kind must be verl or mock")
         if not 0 < self.backend.gpu_memory_utilization < 1:
             raise ValueError("backend.gpu_memory_utilization must be in (0, 1)")
-        if (
-            min(
-                self.backend.request_chunk_size,
-                self.backend.domain_request_chunk_size,
-            )
-            < 1
-        ):
-            raise ValueError("backend request chunk sizes must be positive")
-        if (
-            self.backend.kind == "verl"
-            and str(
-                _select(
-                    self.verl_config,
-                    "actor_rollout_ref.rollout.logprobs_mode",
-                    "processed_logprobs",
-                )
-            )
-            != "processed_logprobs"
-        ):
-            raise ValueError(
-                "VERL domain probabilities require rollout.logprobs_mode="
-                "processed_logprobs"
-            )
+        if self.backend.request_chunk_size < 1:
+            raise ValueError("backend.request_chunk_size must be positive")
         if self.backend.kind == "verl" and self.verl_config:
             ray_num_cpus = _select(self.verl_config, "ray_init.num_cpus")
             if (
@@ -465,7 +426,6 @@ def load_config(path: str | Path) -> AppConfig:
         generation=_construct(GenerationConfig, data.get("generation")),
         labeling=_construct(LabelingConfig, data.get("labeling")),
         scoring=_construct(ScoringConfig, data.get("scoring")),
-        domain=_construct(DomainConfig, data.get("domain")),
         novelty=_construct(NoveltyConfig, data.get("novelty")),
         archive=_construct(ArchiveConfig, data.get("archive")),
         frontier=_construct(FrontierConfig, data.get("frontier")),

@@ -58,13 +58,17 @@ Novelty is checked against both parents, the accepted catalog, and earlier survi
 
 ## Domain and problem-type assignment
 
-Domain labeling evaluates all seven domain hypotheses independently and accepts exactly one only when both configured confidence conditions hold:
+Crossover emits exactly one `<domain>` field together with the child question
+and proposed answer. The parser accepts only one exact lowercase token from the
+seven-domain vocabulary; a missing, duplicated, misspelled, capitalized,
+hierarchical, or multi-domain value rejects the complete response before
+pseudo-labeling. No separate domain-generation or domain-verification rollout
+is performed.
 
-- top probability at least `domain.min_probability`;
-- every other arm below `domain.min_probability`, so there is exactly one high-confidence YES arm;
-- top-versus-runner-up logit margin at least `domain.min_logit_margin`.
-
-The labeler identity, policy version, prompt/rules hash, seven probabilities, selected label, and thresholds belong in the audit evidence. A generated self-declared domain is ignored.
+The accepted record stores the declared token with
+`source: crossover_self_report` and `independently_verified: false`. Thus the
+MAP coordinate is syntactically closed and fully auditable, but it is the
+crossover model's semantic judgment rather than an independent classifier's.
 
 Problem type is derived from the visible output request and cross-checked against the verifier mode:
 
@@ -139,7 +143,7 @@ Before preflight or run, apply the repository's idempotent environment patch:
 python patches/verl_agent_loop_sampling.py
 ```
 
-It makes the installed async agent-loop worker honor each `DataProto.meta_info` override for temperature, top-p, top-k, maximum tokens, log probabilities, and allowed token IDs. This is load-bearing for sharing one resident worker among crossover, nine-rollout labeling, eight-rollout scoring, and calibrated one-token domain classification. Preflight verifies the marker and fails before Ray reserves GPUs when the patch is absent. An unknown VERL source anchor is an error, not permission to continue unpatched.
+It makes the installed async agent-loop worker honor each `DataProto.meta_info` override for temperature, top-p, top-k, maximum tokens, log probabilities, and allowed token IDs. This is load-bearing for sharing one resident worker among crossover, nine-rollout labeling, and eight-rollout scoring. Preflight verifies the marker and fails before Ray reserves GPUs when the patch is absent. An unknown VERL source anchor is an error, not permission to continue unpatched.
 
 Production configs must also give Ray explicit positive `num_cpus` and
 `object_store_memory` values. Host-wide auto-detection is forbidden: on a
